@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import * as authService from "../services/auth.service";
+import { sanitizeError } from "../utils/errors";
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -49,8 +50,7 @@ export async function register(req: Request, res: Response) {
       data: user,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Registration failed";
-    res.status(400).json({ success: false, message });
+    res.status(400).json({ success: false, message: sanitizeError(error, "register") });
   }
 }
 
@@ -84,8 +84,7 @@ export async function login(req: Request, res: Response) {
       data: result,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Login failed";
-    res.status(401).json({ success: false, message });
+    res.status(401).json({ success: false, message: sanitizeError(error, "login") });
   }
 }
 
@@ -108,6 +107,8 @@ export async function forgotPassword(req: Request, res: Response) {
       message: result.message,
     });
   } catch (error) {
+    // Always return success to prevent email enumeration
+    console.error("[forgotPassword] Internal error:", error);
     res.json({
       success: true,
       message: "If your email is registered, you will receive an OTP",
@@ -142,8 +143,7 @@ export async function verifyOtp(req: Request, res: Response) {
       data: result,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "OTP verification failed";
-    res.status(400).json({ success: false, message });
+    res.status(400).json({ success: false, message: sanitizeError(error, "verifyOtp") });
   }
 }
 
@@ -177,7 +177,6 @@ export async function resetPassword(req: Request, res: Response) {
       message: result.message,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Password reset failed";
-    res.status(400).json({ success: false, message });
+    res.status(400).json({ success: false, message: sanitizeError(error, "resetPassword") });
   }
 }
