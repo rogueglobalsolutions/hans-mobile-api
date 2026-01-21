@@ -21,7 +21,7 @@ Create a `.env` file in the project root:
 
 ```env
 # Server
-PORT=5000
+PORT=5656
 
 # Database
 DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE"
@@ -43,7 +43,7 @@ EMAIL_FROM=your-email@gmail.com
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `PORT` | No | Server port (default: 5000) |
+| `PORT` | No | Server port (default: 5656) |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `JWT_SECRET` | Yes | Secret key for JWT signing |
 | `SMTP_HOST` | No | SMTP server hostname |
@@ -94,7 +94,7 @@ npm start
 Test the health endpoint:
 
 ```bash
-curl http://localhost:5000/api/health
+curl http://localhost:5656/api/health
 ```
 
 Expected response:
