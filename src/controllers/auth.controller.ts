@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import * as authService from "../services/auth.service";
 import { Role } from "../generated/prisma/enums";
 import { sanitizeError } from "../utils/errors";
+import { validateAndFormatPhone } from "../utils/phone";
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -23,6 +24,12 @@ export async function register(req: Request, res: Response) {
 
     if (!phoneNumber || typeof phoneNumber !== "string" || !phoneNumber.trim()) {
       errors.push("Phone number is required");
+    } else {
+      // Validate phone number format
+      const phoneValidation = validateAndFormatPhone(phoneNumber.trim());
+      if (!phoneValidation.isValid) {
+        errors.push(phoneValidation.error || "Invalid phone number format");
+      }
     }
 
     if (!password || typeof password !== "string" || password.length < 8) {
@@ -46,10 +53,21 @@ export async function register(req: Request, res: Response) {
       return;
     }
 
+    // Format phone number to E.164
+    const phoneValidation = validateAndFormatPhone(phoneNumber.trim());
+    if (!phoneValidation.isValid || !phoneValidation.formatted) {
+      res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: ["Invalid phone number format"],
+      });
+      return;
+    }
+
     const user = await authService.register({
       fullName: fullName.trim(),
       email: email.toLowerCase().trim(),
-      phoneNumber: phoneNumber.trim(),
+      phoneNumber: phoneValidation.formatted,
       password,
       role: role as Role | undefined,
     });

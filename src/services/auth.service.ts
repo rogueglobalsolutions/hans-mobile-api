@@ -27,6 +27,15 @@ export async function register(input: RegisterInput) {
     throw new Error("Email already registered");
   }
 
+  // Check if phone number is already registered
+  const existingPhone = await prisma.user.findFirst({
+    where: { phoneNumber: input.phoneNumber },
+  });
+
+  if (existingPhone) {
+    throw new Error("Phone number already registered");
+  }
+
   // Validate role - only USER and MED are allowed for registration
   if (input.role && input.role === Role.ADMIN) {
     throw new Error("Invalid role");

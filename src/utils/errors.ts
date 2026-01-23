@@ -1,5 +1,6 @@
 const SAFE_MESSAGES: Record<string, string> = {
   "Email already registered": "Email already registered",
+  "Phone number already registered": "Phone number already registered",
   "Invalid email or password": "Invalid email or password",
   "Invalid OTP": "Invalid OTP",
   "Invalid or expired OTP": "Invalid or expired OTP",

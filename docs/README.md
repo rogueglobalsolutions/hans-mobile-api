@@ -9,6 +9,7 @@ A Node.js/Express REST API backend for the Hans mobile application (React Native
 - **Database**: PostgreSQL with Prisma 7 ORM
 - **Authentication**: JWT (jsonwebtoken) + bcryptjs
 - **Email**: Nodemailer
+- **Phone Validation**: libphonenumber-js
 
 ## Project Structure
 
