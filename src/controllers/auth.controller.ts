@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import * as authService from "../services/auth.service";
+import { Role } from "../generated/prisma/enums";
 import { sanitizeError } from "../utils/errors";
 
 function isValidEmail(email: string): boolean {
@@ -8,7 +9,7 @@ function isValidEmail(email: string): boolean {
 
 export async function register(req: Request, res: Response) {
   try {
-    const { fullName, email, phoneNumber, password, confirmPassword } = req.body;
+    const { fullName, email, phoneNumber, password, confirmPassword, role } = req.body;
 
     const errors: string[] = [];
 
@@ -32,6 +33,14 @@ export async function register(req: Request, res: Response) {
       errors.push("Passwords do not match");
     }
 
+    // Validate role if provided
+    if (role !== undefined) {
+      const validRoles = [Role.USER, Role.MED];
+      if (!validRoles.includes(role)) {
+        errors.push("Invalid role. Only USER and MED roles are allowed for registration");
+      }
+    }
+
     if (errors.length > 0) {
       res.status(400).json({ success: false, message: "Validation failed", errors });
       return;
@@ -42,6 +51,7 @@ export async function register(req: Request, res: Response) {
       email: email.toLowerCase().trim(),
       phoneNumber: phoneNumber.trim(),
       password,
+      role: role as Role | undefined,
     });
 
     res.status(201).json({

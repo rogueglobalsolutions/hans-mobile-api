@@ -26,6 +26,19 @@ All responses follow this structure:
 }
 ```
 
+### Error Response Sanitization
+
+For security, error messages are sanitized to prevent internal information leakage. Only predefined safe error messages are returned to clients:
+
+- "Email already registered"
+- "Invalid email or password"
+- "Invalid OTP"
+- "Invalid or expired OTP"
+- "Invalid or expired reset token"
+- "Invalid role"
+
+Any other internal errors return generic fallback messages (e.g., "Registration failed. Please try again.") while logging the actual error server-side for debugging.
+
 ---
 
 ## Health Check
@@ -44,6 +57,23 @@ Check if the API is running.
 
 ---
 
+## User Roles
+
+The API supports three user roles with different access levels:
+
+| Role | Description | Registration |
+|------|-------------|--------------|
+| `USER` | Regular user with standard access | Self-registration (default) |
+| `MED` | Medical professional with elevated access | Self-registration |
+| `ADMIN` | System administrator with full access | Manual creation by sysadmin only |
+
+**Important Notes:**
+- Users can register as `USER` (default) or `MED` through the `/api/auth/register` endpoint
+- The `ADMIN` role cannot be selected during registration and must be assigned manually by system administrators
+- If no role is specified during registration, the user is assigned the `USER` role by default
+
+---
+
 ## Authentication Endpoints
 
 ### POST /api/auth/register
@@ -58,7 +88,8 @@ Create a new user account.
   "email": "john@example.com",
   "phoneNumber": "+1234567890",
   "password": "securepassword123",
-  "confirmPassword": "securepassword123"
+  "confirmPassword": "securepassword123",
+  "role": "USER"
 }
 ```
 
@@ -71,6 +102,7 @@ Create a new user account.
 | phoneNumber | Required, non-empty string |
 | password | Required, minimum 8 characters |
 | confirmPassword | Must match password |
+| role | Optional, must be "USER" or "MED" (defaults to "USER"). ADMIN role cannot be registered. |
 
 **Success Response** (201)
 
@@ -82,7 +114,8 @@ Create a new user account.
     "id": "uuid",
     "fullName": "John Doe",
     "email": "john@example.com",
-    "phoneNumber": "+1234567890"
+    "phoneNumber": "+1234567890",
+    "role": "USER"
   }
 }
 ```
@@ -123,7 +156,8 @@ Authenticate a user and receive a JWT token.
       "id": "uuid",
       "fullName": "John Doe",
       "email": "john@example.com",
-      "phoneNumber": "+1234567890"
+      "phoneNumber": "+1234567890",
+      "role": "USER"
     }
   }
 }
