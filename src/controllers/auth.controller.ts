@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
 import * as authService from "../services/auth.service";
+import { Role } from "../generated/prisma/enums";
 import { sanitizeError } from "../utils/errors";
+import { validateAndFormatPhone } from "../utils/phone";
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -8,7 +10,7 @@ function isValidEmail(email: string): boolean {
 
 export async function register(req: Request, res: Response) {
   try {
-    const { fullName, email, phoneNumber, password, confirmPassword } = req.body;
+    const { fullName, email, phoneNumber, password, confirmPassword, role } = req.body;
 
     const errors: string[] = [];
 
@@ -22,6 +24,12 @@ export async function register(req: Request, res: Response) {
 
     if (!phoneNumber || typeof phoneNumber !== "string" || !phoneNumber.trim()) {
       errors.push("Phone number is required");
+    } else {
+      // Validate phone number format
+      const phoneValidation = validateAndFormatPhone(phoneNumber.trim());
+      if (!phoneValidation.isValid) {
+        errors.push(phoneValidation.error || "Invalid phone number format");
+      }
     }
 
     if (!password || typeof password !== "string" || password.length < 8) {
@@ -32,16 +40,36 @@ export async function register(req: Request, res: Response) {
       errors.push("Passwords do not match");
     }
 
+    // Validate role if provided
+    if (role !== undefined) {
+      const validRoles = [Role.USER, Role.MED];
+      if (!validRoles.includes(role)) {
+        errors.push("Invalid role. Only USER and MED roles are allowed for registration");
+      }
+    }
+
     if (errors.length > 0) {
       res.status(400).json({ success: false, message: "Validation failed", errors });
+      return;
+    }
+
+    // Format phone number to E.164
+    const phoneValidation = validateAndFormatPhone(phoneNumber.trim());
+    if (!phoneValidation.isValid || !phoneValidation.formatted) {
+      res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: ["Invalid phone number format"],
+      });
       return;
     }
 
     const user = await authService.register({
       fullName: fullName.trim(),
       email: email.toLowerCase().trim(),
-      phoneNumber: phoneNumber.trim(),
+      phoneNumber: phoneValidation.formatted,
       password,
+      role: role as Role | undefined,
     });
 
     res.status(201).json({

@@ -7,12 +7,19 @@ datasource db {
   provider = "postgresql"
 }
 
+enum Role {
+  USER
+  MED
+  ADMIN
+}
+
 model User {
   id          String   @id @default(uuid())
   fullName    String
   email       String   @unique
-  phoneNumber String
+  phoneNumber String   @unique
   password    String
+  role        Role     @default(USER)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   otps        Otp[]

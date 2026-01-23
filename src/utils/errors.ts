@@ -1,9 +1,11 @@
 const SAFE_MESSAGES: Record<string, string> = {
   "Email already registered": "Email already registered",
+  "Phone number already registered": "Phone number already registered",
   "Invalid email or password": "Invalid email or password",
   "Invalid OTP": "Invalid OTP",
   "Invalid or expired OTP": "Invalid or expired OTP",
   "Invalid or expired reset token": "Invalid or expired reset token",
+  "Invalid role": "Invalid role",
 };
 
 const FALLBACK_MESSAGES: Record<string, string> = {

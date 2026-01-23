@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import prisma from "../config/prisma";
+import { Role } from "../generated/prisma/enums";
 import { signToken, signResetToken, verifyToken, ResetTokenPayload } from "../utils/jwt";
 import { generateOtp, getOtpExpiry } from "../utils/otp";
 import { sendOtpEmail } from "./email.service";
@@ -9,6 +10,7 @@ interface RegisterInput {
   email: string;
   phoneNumber: string;
   password: string;
+  role?: Role;
 }
 
 interface LoginInput {
@@ -25,6 +27,20 @@ export async function register(input: RegisterInput) {
     throw new Error("Email already registered");
   }
 
+  // Check if phone number is already registered
+  const existingPhone = await prisma.user.findFirst({
+    where: { phoneNumber: input.phoneNumber },
+  });
+
+  if (existingPhone) {
+    throw new Error("Phone number already registered");
+  }
+
+  // Validate role - only USER and MED are allowed for registration
+  if (input.role && input.role === Role.ADMIN) {
+    throw new Error("Invalid role");
+  }
+
   const hashedPassword = await bcrypt.hash(input.password, 10);
 
   const user = await prisma.user.create({
@@ -33,6 +49,7 @@ export async function register(input: RegisterInput) {
       email: input.email,
       phoneNumber: input.phoneNumber,
       password: hashedPassword,
+      role: input.role || Role.USER,
     },
   });
 
@@ -41,6 +58,7 @@ export async function register(input: RegisterInput) {
     fullName: user.fullName,
     email: user.email,
     phoneNumber: user.phoneNumber,
+    role: user.role,
   };
 }
 
@@ -68,6 +86,7 @@ export async function login(input: LoginInput) {
       fullName: user.fullName,
       email: user.email,
       phoneNumber: user.phoneNumber,
+      role: user.role,
     },
   };
 }

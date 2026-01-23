@@ -26,6 +26,20 @@ All responses follow this structure:
 }
 ```
 
+### Error Response Sanitization
+
+For security, error messages are sanitized to prevent internal information leakage. Only predefined safe error messages are returned to clients:
+
+- "Email already registered"
+- "Phone number already registered"
+- "Invalid email or password"
+- "Invalid OTP"
+- "Invalid or expired OTP"
+- "Invalid or expired reset token"
+- "Invalid role"
+
+Any other internal errors return generic fallback messages (e.g., "Registration failed. Please try again.") while logging the actual error server-side for debugging.
+
 ---
 
 ## Health Check
@@ -44,6 +58,23 @@ Check if the API is running.
 
 ---
 
+## User Roles
+
+The API supports three user roles with different access levels:
+
+| Role | Description | Registration |
+|------|-------------|--------------|
+| `USER` | Regular user with standard access | Self-registration (default) |
+| `MED` | Medical professional with elevated access | Self-registration |
+| `ADMIN` | System administrator with full access | Manual creation by sysadmin only |
+
+**Important Notes:**
+- Users can register as `USER` (default) or `MED` through the `/api/auth/register` endpoint
+- The `ADMIN` role cannot be selected during registration and must be assigned manually by system administrators
+- If no role is specified during registration, the user is assigned the `USER` role by default
+
+---
+
 ## Authentication Endpoints
 
 ### POST /api/auth/register
@@ -56,9 +87,10 @@ Create a new user account.
 {
   "fullName": "John Doe",
   "email": "john@example.com",
-  "phoneNumber": "+1234567890",
+  "phoneNumber": "+14155552671",
   "password": "securepassword123",
-  "confirmPassword": "securepassword123"
+  "confirmPassword": "securepassword123",
+  "role": "USER"
 }
 ```
 
@@ -67,10 +99,17 @@ Create a new user account.
 | Field | Rules |
 |-------|-------|
 | fullName | Required, non-empty string |
-| email | Required, valid email format |
-| phoneNumber | Required, non-empty string |
+| email | Required, valid email format, must be unique |
+| phoneNumber | Required, valid international format (E.164), must be unique |
 | password | Required, minimum 8 characters |
 | confirmPassword | Must match password |
+| role | Optional, must be "USER" or "MED" (defaults to "USER"). ADMIN role cannot be registered. |
+
+**Phone Number Validation:**
+- Phone numbers are validated using `libphonenumber-js` on both frontend and backend
+- Must be in valid international format (e.g., `+14155552671`, `+639171234567`)
+- Stored in E.164 format in the database for consistency
+- Each phone number can only be registered once
 
 **Success Response** (201)
 
@@ -82,7 +121,8 @@ Create a new user account.
     "id": "uuid",
     "fullName": "John Doe",
     "email": "john@example.com",
-    "phoneNumber": "+1234567890"
+    "phoneNumber": "+14155552671",
+    "role": "USER"
   }
 }
 ```
@@ -93,6 +133,25 @@ Create a new user account.
 {
   "success": false,
   "message": "Email already registered"
+}
+```
+
+Or if phone number is already in use:
+
+```json
+{
+  "success": false,
+  "message": "Phone number already registered"
+}
+```
+
+Or if phone number format is invalid:
+
+```json
+{
+  "success": false,
+  "message": "Validation failed",
+  "errors": ["Invalid phone number format"]
 }
 ```
 
@@ -123,7 +182,8 @@ Authenticate a user and receive a JWT token.
       "id": "uuid",
       "fullName": "John Doe",
       "email": "john@example.com",
-      "phoneNumber": "+1234567890"
+      "phoneNumber": "+14155552671",
+      "role": "USER"
     }
   }
 }
