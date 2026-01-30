@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import authRoutes from "./routes/auth.routes";
+import verificationRoutes from "./routes/verification.routes";
+import adminRoutes from "./routes/admin.routes";
 
 dotenv.config();
 
@@ -17,6 +19,8 @@ app.get("/api/health", (req, res) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api/verification", verificationRoutes);
+app.use("/api/admin", adminRoutes);
 
 // Global error handler
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {

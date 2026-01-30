@@ -37,6 +37,12 @@ For security, error messages are sanitized to prevent internal information leaka
 - "Invalid or expired OTP"
 - "Invalid or expired reset token"
 - "Invalid role"
+- "Account suspended"
+- "User not found"
+- "Account not eligible for verification"
+- "User is not pending verification"
+- "Only rejected accounts can resubmit verification"
+- "Insufficient permissions"
 
 Any other internal errors return generic fallback messages (e.g., "Registration failed. Please try again.") while logging the actual error server-side for debugging.
 
@@ -72,6 +78,60 @@ The API supports three user roles with different access levels:
 - Users can register as `USER` (default) or `MED` through the `/api/auth/register` endpoint
 - The `ADMIN` role cannot be selected during registration and must be assigned manually by system administrators
 - If no role is specified during registration, the user is assigned the `USER` role by default
+
+---
+
+## Account Status & Verification
+
+MED (Medical Professional) users require identity verification before they can log in. The verification workflow is as follows:
+
+### Account Statuses
+
+| Status | Description |
+|--------|-------------|
+| `ACTIVE` | Account is verified and can log in (default for USER role) |
+| `PENDING_VERIFICATION` | Account created but awaiting admin verification (default for MED role) |
+| `REJECTED` | Verification documents were rejected by admin |
+| `SUSPENDED` | Account suspended by admin |
+
+### MED User Verification Flow
+
+1. **Registration**: MED user registers with role `MED`
+   - Account status is automatically set to `PENDING_VERIFICATION`
+   - User receives a bearer token and can log in
+
+2. **Login & App Redirect**: MED user logs in
+   - Login succeeds and returns bearer token + `accountStatus`
+   - Mobile app checks `accountStatus` in response:
+     - `PENDING_VERIFICATION` → Redirect to verification upload screen
+     - `REJECTED` → Redirect to re-submission screen
+     - `ACTIVE` → Redirect to main app
+
+3. **Submit Documents**: MED user submits verification documents via `/api/verification/submit`
+   - Front and back images of ID document
+   - Medical license number
+   - Documents stored locally in `uploads/verifications/`
+
+4. **Admin Review**: Admin reviews pending verifications via `/api/admin/verifications/pending`
+   - Approves via `/api/admin/verifications/approve` → Status becomes `ACTIVE`
+   - Rejects via `/api/admin/verifications/reject` → Status becomes `REJECTED`
+
+5. **Email Notification**: User receives email notification of approval/rejection
+
+6. **Re-login After Status Change**:
+   - If **approved**, next login redirects to main app
+   - If **rejected**, next login redirects to re-submission screen
+   - User can resubmit via `/api/verification/resubmit`
+     - Status changes back to `PENDING_VERIFICATION`
+     - Previous rejection notes are cleared
+     - Admin reviews again from step 4
+
+### Document Storage
+
+- ID documents are stored in local filesystem at `uploads/verifications/`
+- Filename format: `{userId}_{timestamp}_{side}.{ext}`
+- Supported formats: JPEG, PNG, WebP
+- Maximum file size: 5MB per image
 
 ---
 
@@ -122,10 +182,15 @@ Create a new user account.
     "fullName": "John Doe",
     "email": "john@example.com",
     "phoneNumber": "+14155552671",
-    "role": "USER"
+    "role": "USER",
+    "accountStatus": "ACTIVE"
   }
 }
 ```
+
+**Important**:
+- If registering as `USER`, `accountStatus` will be `ACTIVE` and user can log in immediately
+- If registering as `MED`, `accountStatus` will be `PENDING_VERIFICATION` and user must submit verification documents before logging in
 
 **Error Response** (400)
 
@@ -183,7 +248,8 @@ Authenticate a user and receive a JWT token.
       "fullName": "John Doe",
       "email": "john@example.com",
       "phoneNumber": "+14155552671",
-      "role": "USER"
+      "role": "USER",
+      "accountStatus": "ACTIVE"
     }
   }
 }
@@ -195,6 +261,49 @@ Authenticate a user and receive a JWT token.
 {
   "success": false,
   "message": "Invalid email or password"
+}
+```
+
+Or if account is suspended:
+
+```json
+{
+  "success": false,
+  "message": "Account suspended"
+}
+```
+
+**Important - Account Status Handling:**
+
+The login endpoint returns `accountStatus` in the response. Your mobile app should handle redirects based on this status:
+
+| accountStatus | Action |
+|---------------|--------|
+| `ACTIVE` | User is fully verified, redirect to main app |
+| `PENDING_VERIFICATION` | MED user needs to submit verification documents, redirect to upload screen |
+| `REJECTED` | MED user's verification was rejected, redirect to re-submission screen with rejection reason |
+| `SUSPENDED` | Login blocked with error (only this status prevents login) |
+
+**Example Login Flow:**
+```javascript
+// Login response
+const response = await login(email, password);
+const { token, user } = response.data;
+
+// Save token for authenticated requests
+saveToken(token);
+
+// Route user based on account status
+switch (user.accountStatus) {
+  case 'ACTIVE':
+    navigate('/home');
+    break;
+  case 'PENDING_VERIFICATION':
+    navigate('/verification/upload');
+    break;
+  case 'REJECTED':
+    navigate('/verification/resubmit');
+    break;
 }
 ```
 
@@ -343,6 +452,202 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 ---
 
+## Verification Endpoints
+
+### POST /api/verification/submit
+
+Submit verification documents for MED users. Requires authentication.
+
+**Authentication**: Required (Bearer token)
+
+**Request**: `multipart/form-data`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| medicalLicenseNumber | string | Yes | Medical license number |
+| idDocumentFront | file | Yes | Front side of ID document (JPEG, PNG, WebP, max 5MB) |
+| idDocumentBack | file | Yes | Back side of ID document (JPEG, PNG, WebP, max 5MB) |
+
+**Example using cURL**:
+
+```bash
+curl -X POST http://localhost:5656/api/verification/submit \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "medicalLicenseNumber=MED123456" \
+  -F "idDocumentFront=@/path/to/front.jpg" \
+  -F "idDocumentBack=@/path/to/back.jpg"
+```
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Verification documents submitted successfully. Your account will be reviewed by our team."
+}
+```
+
+**Error Response** (400)
+
+```json
+{
+  "success": false,
+  "message": "Validation failed",
+  "errors": [
+    "Medical license number is required",
+    "Front side of ID document is required"
+  ]
+}
+```
+
+---
+
+### POST /api/verification/resubmit
+
+Re-submit verification documents after rejection. Only available for accounts with `REJECTED` status.
+
+**Authentication**: Required (Bearer token)
+
+**Request**: `multipart/form-data`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| medicalLicenseNumber | string | Yes | Medical license number |
+| idDocumentFront | file | Yes | Front side of ID document (JPEG, PNG, WebP, max 5MB) |
+| idDocumentBack | file | Yes | Back side of ID document (JPEG, PNG, WebP, max 5MB) |
+
+**Example using cURL**:
+
+```bash
+curl -X POST http://localhost:5656/api/verification/resubmit \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "medicalLicenseNumber=MED123456" \
+  -F "idDocumentFront=@/path/to/front.jpg" \
+  -F "idDocumentBack=@/path/to/back.jpg"
+```
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Verification documents resubmitted successfully. Your account will be reviewed again by our team."
+}
+```
+
+**Error Response** (400)
+
+```json
+{
+  "success": false,
+  "message": "Only rejected accounts can resubmit verification"
+}
+```
+
+**Important**:
+- Only works for accounts with `REJECTED` status
+- Account status automatically changes back to `PENDING_VERIFICATION`
+- Previous rejection notes are cleared
+- Old document paths are replaced with new uploads
+
+---
+
+## Admin Endpoints
+
+All admin endpoints require authentication with an ADMIN role user. Attempting to access these endpoints without proper role will result in a 403 Forbidden error.
+
+### GET /api/admin/verifications/pending
+
+Get list of pending verifications.
+
+**Authentication**: Required (Bearer token - ADMIN role)
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Pending verifications retrieved successfully",
+  "data": [
+    {
+      "id": "user-uuid",
+      "fullName": "Dr. Jane Smith",
+      "email": "jane.smith@example.com",
+      "phoneNumber": "+14155552671",
+      "medicalLicenseNumber": "MED123456",
+      "idDocumentFrontPath": "uploads/verifications/user-uuid_1234567890_idDocumentFront.jpg",
+      "idDocumentBackPath": "uploads/verifications/user-uuid_1234567890_idDocumentBack.jpg",
+      "createdAt": "2025-01-29T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
+### POST /api/admin/verifications/approve
+
+Approve a MED user's verification.
+
+**Authentication**: Required (Bearer token - ADMIN role)
+
+**Request Body**
+
+```json
+{
+  "userId": "user-uuid",
+  "notes": "All documents verified successfully"
+}
+```
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "User verification approved successfully"
+}
+```
+
+**Note**: User receives an email notification upon approval and account status becomes `ACTIVE`.
+
+---
+
+### POST /api/admin/verifications/reject
+
+Reject a MED user's verification.
+
+**Authentication**: Required (Bearer token - ADMIN role)
+
+**Request Body**
+
+```json
+{
+  "userId": "user-uuid",
+  "notes": "Medical license number could not be verified"
+}
+```
+
+**Validation Rules**
+
+| Field | Rules |
+|-------|-------|
+| userId | Required |
+| notes | Required (rejection reason) |
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "User verification rejected"
+}
+```
+
+**Note**: User receives an email notification with the rejection reason and account status becomes `REJECTED`.
+
+---
+
 ## Error Codes
 
 | HTTP Status | Meaning |
@@ -351,4 +656,5 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 | 201 | Created |
 | 400 | Bad Request (validation error) |
 | 401 | Unauthorized (invalid credentials or token) |
+| 403 | Forbidden (valid token but insufficient permissions) |
 | 500 | Internal Server Error |
