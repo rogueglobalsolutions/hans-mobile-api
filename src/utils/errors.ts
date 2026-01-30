@@ -6,6 +6,12 @@ const SAFE_MESSAGES: Record<string, string> = {
   "Invalid or expired OTP": "Invalid or expired OTP",
   "Invalid or expired reset token": "Invalid or expired reset token",
   "Invalid role": "Invalid role",
+  "Account suspended": "Your account has been suspended. Please contact support.",
+  "User not found": "User not found",
+  "Account not eligible for verification": "Account is not eligible for verification",
+  "User is not pending verification": "User is not pending verification",
+  "Only rejected accounts can resubmit verification": "Only rejected accounts can resubmit verification",
+  "Insufficient permissions": "Insufficient permissions",
 };
 
 const FALLBACK_MESSAGES: Record<string, string> = {
@@ -14,6 +20,11 @@ const FALLBACK_MESSAGES: Record<string, string> = {
   forgotPassword: "Request failed. Please try again.",
   verifyOtp: "OTP verification failed. Please try again.",
   resetPassword: "Password reset failed. Please try again.",
+  submitVerification: "Verification submission failed. Please try again.",
+  resubmitVerification: "Verification resubmission failed. Please try again.",
+  approveVerification: "Approval failed. Please try again.",
+  rejectVerification: "Rejection failed. Please try again.",
+  getPendingVerifications: "Failed to retrieve pending verifications.",
 };
 
 export function sanitizeError(error: unknown, operation: keyof typeof FALLBACK_MESSAGES): string {

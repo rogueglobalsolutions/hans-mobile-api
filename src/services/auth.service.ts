@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import prisma from "../config/prisma";
-import { Role } from "../generated/prisma/enums";
+import { Role, AccountStatus } from "../generated/prisma/enums";
 import { signToken, signResetToken, verifyToken, ResetTokenPayload } from "../utils/jwt";
 import { generateOtp, getOtpExpiry } from "../utils/otp";
 import { sendOtpEmail } from "./email.service";
@@ -43,13 +43,18 @@ export async function register(input: RegisterInput) {
 
   const hashedPassword = await bcrypt.hash(input.password, 10);
 
+  // Determine account status based on role
+  const userRole = input.role || Role.USER;
+  const accountStatus = userRole === Role.MED ? AccountStatus.PENDING_VERIFICATION : AccountStatus.ACTIVE;
+
   const user = await prisma.user.create({
     data: {
       fullName: input.fullName,
       email: input.email,
       phoneNumber: input.phoneNumber,
       password: hashedPassword,
-      role: input.role || Role.USER,
+      role: userRole,
+      accountStatus,
     },
   });
 
@@ -59,6 +64,7 @@ export async function register(input: RegisterInput) {
     email: user.email,
     phoneNumber: user.phoneNumber,
     role: user.role,
+    accountStatus: user.accountStatus,
   };
 }
 
@@ -77,6 +83,12 @@ export async function login(input: LoginInput) {
     throw new Error("Invalid email or password");
   }
 
+  // Check account status - only block SUSPENDED accounts from logging in
+  // PENDING_VERIFICATION and REJECTED can log in, but app will redirect based on accountStatus
+  if (user.accountStatus === AccountStatus.SUSPENDED) {
+    throw new Error("Account suspended");
+  }
+
   const token = signToken({ userId: user.id, email: user.email });
 
   return {
@@ -87,6 +99,7 @@ export async function login(input: LoginInput) {
       email: user.email,
       phoneNumber: user.phoneNumber,
       role: user.role,
+      accountStatus: user.accountStatus,
     },
   };
 }
