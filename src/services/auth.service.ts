@@ -65,6 +65,7 @@ export async function register(input: RegisterInput) {
     phoneNumber: user.phoneNumber,
     role: user.role,
     accountStatus: user.accountStatus,
+    hasSubmittedVerification: user.hasSubmittedVerification,
   };
 }
 
@@ -100,6 +101,7 @@ export async function login(input: LoginInput) {
       phoneNumber: user.phoneNumber,
       role: user.role,
       accountStatus: user.accountStatus,
+      hasSubmittedVerification: user.hasSubmittedVerification,
     },
   };
 }

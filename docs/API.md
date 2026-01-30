@@ -183,14 +183,16 @@ Create a new user account.
     "email": "john@example.com",
     "phoneNumber": "+14155552671",
     "role": "USER",
-    "accountStatus": "ACTIVE"
+    "accountStatus": "ACTIVE",
+    "hasSubmittedVerification": false
   }
 }
 ```
 
 **Important**:
-- If registering as `USER`, `accountStatus` will be `ACTIVE` and user can log in immediately
-- If registering as `MED`, `accountStatus` will be `PENDING_VERIFICATION` and user must submit verification documents before logging in
+- If registering as `USER`, `accountStatus` will be `ACTIVE` and `hasSubmittedVerification` will be `false`
+- If registering as `MED`, `accountStatus` will be `PENDING_VERIFICATION` and `hasSubmittedVerification` will be `false`
+- User can log in regardless of verification status, but the app should route based on these flags
 
 **Error Response** (400)
 
@@ -249,7 +251,8 @@ Authenticate a user and receive a JWT token.
       "email": "john@example.com",
       "phoneNumber": "+14155552671",
       "role": "USER",
-      "accountStatus": "ACTIVE"
+      "accountStatus": "ACTIVE",
+      "hasSubmittedVerification": false
     }
   }
 }
@@ -273,16 +276,17 @@ Or if account is suspended:
 }
 ```
 
-**Important - Account Status Handling:**
+**Important - Account Status & Verification Handling:**
 
-The login endpoint returns `accountStatus` in the response. Your mobile app should handle redirects based on this status:
+The login endpoint returns both `accountStatus` and `hasSubmittedVerification`. Your mobile app should use **both flags** to determine routing:
 
-| accountStatus | Action |
-|---------------|--------|
-| `ACTIVE` | User is fully verified, redirect to main app |
-| `PENDING_VERIFICATION` | MED user needs to submit verification documents, redirect to upload screen |
-| `REJECTED` | MED user's verification was rejected, redirect to re-submission screen with rejection reason |
-| `SUSPENDED` | Login blocked with error (only this status prevents login) |
+| accountStatus | hasSubmittedVerification | Action |
+|---------------|--------------------------|--------|
+| `ACTIVE` | `false` | Fully verified USER, redirect to main app |
+| `PENDING_VERIFICATION` | `false` | MED user hasn't uploaded documents yet, redirect to upload screen |
+| `PENDING_VERIFICATION` | `true` | MED user submitted documents, awaiting admin review - show "pending review" modal |
+| `REJECTED` | `true` | MED user's verification was rejected, redirect to re-submission screen |
+| `SUSPENDED` | N/A | Login blocked with error (only this status prevents login) |
 
 **Example Login Flow:**
 ```javascript
@@ -293,17 +297,20 @@ const { token, user } = response.data;
 // Save token for authenticated requests
 saveToken(token);
 
-// Route user based on account status
-switch (user.accountStatus) {
-  case 'ACTIVE':
-    navigate('/home');
-    break;
-  case 'PENDING_VERIFICATION':
+// Route user based on account status AND submission status
+if (user.accountStatus === 'ACTIVE') {
+  navigate('/home');
+} else if (user.accountStatus === 'PENDING_VERIFICATION') {
+  if (!user.hasSubmittedVerification) {
+    // Haven't uploaded documents yet - allow access to upload screen
     navigate('/verification/upload');
-    break;
-  case 'REJECTED':
-    navigate('/verification/resubmit');
-    break;
+  } else {
+    // Documents submitted, awaiting review - block access, show modal
+    showModal('Your documents are under review. Please check back later.');
+  }
+} else if (user.accountStatus === 'REJECTED') {
+  // Rejected - allow resubmission
+  navigate('/verification/resubmit');
 }
 ```
 
