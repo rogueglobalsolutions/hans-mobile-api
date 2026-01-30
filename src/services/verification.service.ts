@@ -25,6 +25,7 @@ export async function submitVerification(input: SubmitVerificationInput) {
   await prisma.user.update({
     where: { id: input.userId },
     data: {
+      hasSubmittedVerification: true,
       medicalLicenseNumber: input.medicalLicenseNumber,
       idDocumentFrontPath: input.idDocumentFrontPath,
       idDocumentBackPath: input.idDocumentBackPath,
@@ -54,6 +55,7 @@ export async function resubmitVerification(input: SubmitVerificationInput) {
     where: { id: input.userId },
     data: {
       accountStatus: AccountStatus.PENDING_VERIFICATION,
+      hasSubmittedVerification: true,
       medicalLicenseNumber: input.medicalLicenseNumber,
       idDocumentFrontPath: input.idDocumentFrontPath,
       idDocumentBackPath: input.idDocumentBackPath,

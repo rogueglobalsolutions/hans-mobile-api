@@ -21,22 +21,23 @@ enum AccountStatus {
 }
 
 model User {
-  id                    String        @id @default(uuid())
-  fullName              String
-  email                 String        @unique
-  phoneNumber           String        @unique
-  password              String
-  role                  Role          @default(USER)
-  accountStatus         AccountStatus @default(ACTIVE)
-  medicalLicenseNumber  String?
-  idDocumentFrontPath   String?
-  idDocumentBackPath    String?
-  verificationNotes     String?
-  verifiedAt            DateTime?
-  verifiedBy            String?
-  createdAt             DateTime      @default(now())
-  updatedAt             DateTime      @updatedAt
-  otps                  Otp[]
+  id                        String        @id @default(uuid())
+  fullName                  String
+  email                     String        @unique
+  phoneNumber               String        @unique
+  password                  String
+  role                      Role          @default(USER)
+  accountStatus             AccountStatus @default(ACTIVE)
+  hasSubmittedVerification  Boolean       @default(false)
+  medicalLicenseNumber      String?
+  idDocumentFrontPath       String?
+  idDocumentBackPath        String?
+  verificationNotes         String?
+  verifiedAt                DateTime?
+  verifiedBy                String?
+  createdAt                 DateTime      @default(now())
+  updatedAt                 DateTime      @updatedAt
+  otps                      Otp[]
 }
 
 model Otp {
