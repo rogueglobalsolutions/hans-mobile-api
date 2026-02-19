@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import path from "path";
 import dotenv from "dotenv";
 import authRoutes from "./routes/auth.routes";
 import verificationRoutes from "./routes/verification.routes";
@@ -12,6 +13,9 @@ const app = express();
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Serve uploaded ID documents (admin access only — protect in prod with signed URLs or a dedicated middleware)
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 // Routes
 app.get("/api/health", (req, res) => {

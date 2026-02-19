@@ -9,9 +9,13 @@ const router = Router();
 router.use(authenticateToken);
 router.use(requireRole(Role.ADMIN));
 
-// Verification management
+// MED user list and detail
+router.get("/verifications", verificationController.getMedUsers);
 router.get("/verifications/pending", verificationController.getPendingVerifications);
-router.post("/verifications/approve", verificationController.approveVerification);
-router.post("/verifications/reject", verificationController.rejectVerification);
+router.get("/verifications/:userId", verificationController.getMedUserById);
+
+// Approve / reject actions on a specific user
+router.post("/verifications/:userId/approve", verificationController.approveVerification);
+router.post("/verifications/:userId/reject", verificationController.rejectVerification);
 
 export default router;

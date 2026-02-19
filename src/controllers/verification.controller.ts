@@ -33,8 +33,8 @@ export async function submitVerification(req: Request, res: Response) {
     }
 
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    const frontPath = files.idDocumentFront[0].path;
-    const backPath = files.idDocumentBack[0].path;
+    const frontPath = `uploads/verifications/${files.idDocumentFront[0].filename}`;
+    const backPath = `uploads/verifications/${files.idDocumentBack[0].filename}`;
 
     const result = await verificationService.submitVerification({
       userId,
@@ -52,21 +52,41 @@ export async function submitVerification(req: Request, res: Response) {
   }
 }
 
+export async function getMedUsers(req: Request, res: Response) {
+  try {
+    const users = await verificationService.getMedUsers();
+
+    res.json({
+      success: true,
+      message: "MED users retrieved successfully",
+      data: users,
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: sanitizeError(error, "getMedUsers") });
+  }
+}
+
+export async function getMedUserById(req: Request, res: Response) {
+  try {
+    const userId = req.params.userId as string;
+    const user = await verificationService.getMedUserById(userId);
+
+    res.json({
+      success: true,
+      message: "MED user retrieved successfully",
+      data: user,
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: sanitizeError(error, "getMedUserById") });
+  }
+}
+
 export async function approveVerification(req: Request, res: Response) {
   try {
-    const { userId, notes } = req.body;
+    const userId = req.params.userId as string;
     const adminId = (req as any).userId; // From auth middleware
 
-    if (!userId) {
-      res.status(400).json({ success: false, message: "User ID is required" });
-      return;
-    }
-
-    const result = await verificationService.approveVerification({
-      userId,
-      adminId,
-      notes,
-    });
+    const result = await verificationService.approveVerification({ userId, adminId });
 
     res.json({
       success: true,
@@ -79,29 +99,10 @@ export async function approveVerification(req: Request, res: Response) {
 
 export async function rejectVerification(req: Request, res: Response) {
   try {
-    const { userId, notes } = req.body;
+    const userId = req.params.userId as string;
     const adminId = (req as any).userId; // From auth middleware
 
-    const errors: string[] = [];
-
-    if (!userId) {
-      errors.push("User ID is required");
-    }
-
-    if (!notes || typeof notes !== "string" || !notes.trim()) {
-      errors.push("Rejection reason is required");
-    }
-
-    if (errors.length > 0) {
-      res.status(400).json({ success: false, message: "Validation failed", errors });
-      return;
-    }
-
-    const result = await verificationService.rejectVerification({
-      userId,
-      adminId,
-      notes: notes.trim(),
-    });
+    const result = await verificationService.rejectVerification({ userId, adminId });
 
     res.json({
       success: true,
@@ -143,8 +144,8 @@ export async function resubmitVerification(req: Request, res: Response) {
     }
 
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    const frontPath = files.idDocumentFront[0].path;
-    const backPath = files.idDocumentBack[0].path;
+    const frontPath = `uploads/verifications/${files.idDocumentFront[0].filename}`;
+    const backPath = `uploads/verifications/${files.idDocumentBack[0].filename}`;
 
     const result = await verificationService.resubmitVerification({
       userId,

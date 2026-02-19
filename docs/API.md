@@ -39,9 +39,8 @@ For security, error messages are sanitized to prevent internal information leaka
 - "Invalid role"
 - "Account suspended"
 - "User not found"
-- "Account not eligible for verification"
+- "Account is not eligible for verification"
 - "User is not pending verification"
-- "Only rejected accounts can resubmit verification"
 - "Insufficient permissions"
 
 Any other internal errors return generic fallback messages (e.g., "Registration failed. Please try again.") while logging the actual error server-side for debugging.
@@ -101,29 +100,31 @@ MED (Medical Professional) users require identity verification before they can l
    - User receives a bearer token and can log in
 
 2. **Login & App Redirect**: MED user logs in
-   - Login succeeds and returns bearer token + `accountStatus`
-   - Mobile app checks `accountStatus` in response:
-     - `PENDING_VERIFICATION` → Redirect to verification upload screen
+   - Login succeeds and returns bearer token + `accountStatus` + `hasSubmittedVerification`
+   - Mobile app uses **both flags** to determine routing:
+     - `PENDING_VERIFICATION` + `hasSubmittedVerification: false` → Redirect to document upload screen
+     - `PENDING_VERIFICATION` + `hasSubmittedVerification: true` → Show "pending review" screen (documents already submitted)
      - `REJECTED` → Redirect to re-submission screen
      - `ACTIVE` → Redirect to main app
 
-3. **Submit Documents**: MED user submits verification documents via `/api/verification/submit`
-   - Front and back images of ID document
-   - Medical license number
+3. **Submit Documents** (first-time): MED user submits verification documents via `POST /api/verification/submit`
+   - Front and back images of ID document + medical license number
    - Documents stored locally in `uploads/verifications/`
+   - Only valid for accounts with `PENDING_VERIFICATION` status
 
 4. **Admin Review**: Admin reviews pending verifications via `/api/admin/verifications/pending`
-   - Approves via `/api/admin/verifications/approve` → Status becomes `ACTIVE`
-   - Rejects via `/api/admin/verifications/reject` → Status becomes `REJECTED`
+   - Approves via `POST /api/admin/verifications/:userId/approve` → Status becomes `ACTIVE`
+   - Rejects via `POST /api/admin/verifications/:userId/reject` → Status becomes `REJECTED`
 
 5. **Email Notification**: User receives email notification of approval/rejection
 
 6. **Re-login After Status Change**:
    - If **approved**, next login redirects to main app
    - If **rejected**, next login redirects to re-submission screen
-   - User can resubmit via `/api/verification/resubmit`
+   - User resubmits via `POST /api/verification/resubmit`
+     - Only valid for accounts with `REJECTED` status
      - Status changes back to `PENDING_VERIFICATION`
-     - Previous rejection notes are cleared
+     - Previous verification data is cleared
      - Admin reviews again from step 4
 
 ### Document Storage
@@ -282,10 +283,10 @@ The login endpoint returns both `accountStatus` and `hasSubmittedVerification`. 
 
 | accountStatus | hasSubmittedVerification | Action |
 |---------------|--------------------------|--------|
-| `ACTIVE` | `false` | Fully verified USER, redirect to main app |
-| `PENDING_VERIFICATION` | `false` | MED user hasn't uploaded documents yet, redirect to upload screen |
-| `PENDING_VERIFICATION` | `true` | MED user submitted documents, awaiting admin review - show "pending review" modal |
-| `REJECTED` | `true` | MED user's verification was rejected, redirect to re-submission screen |
+| `ACTIVE` | any | Fully verified, redirect to main app |
+| `PENDING_VERIFICATION` | `false` | MED user hasn't uploaded documents yet — redirect to upload screen, hit `POST /api/verification/submit` |
+| `PENDING_VERIFICATION` | `true` | MED user submitted documents, awaiting admin review — show "pending review" screen |
+| `REJECTED` | `true` | MED user's verification was rejected — redirect to re-submission screen, hit `POST /api/verification/resubmit` |
 | `SUSPENDED` | N/A | Login blocked with error (only this status prevents login) |
 
 **Example Login Flow:**
@@ -302,14 +303,14 @@ if (user.accountStatus === 'ACTIVE') {
   navigate('/home');
 } else if (user.accountStatus === 'PENDING_VERIFICATION') {
   if (!user.hasSubmittedVerification) {
-    // Haven't uploaded documents yet - allow access to upload screen
+    // Haven't uploaded documents yet — go to upload screen (hits /submit)
     navigate('/verification/upload');
   } else {
-    // Documents submitted, awaiting review - block access, show modal
-    showModal('Your documents are under review. Please check back later.');
+    // Documents submitted, awaiting review — show pending screen
+    navigate('/verification/pending');
   }
 } else if (user.accountStatus === 'REJECTED') {
-  // Rejected - allow resubmission
+  // Rejected — go to resubmission screen (hits /resubmit with isResubmission: true)
   navigate('/verification/resubmit');
 }
 ```
@@ -511,7 +512,7 @@ curl -X POST http://localhost:5656/api/verification/submit \
 
 ### POST /api/verification/resubmit
 
-Re-submit verification documents after rejection. Only available for accounts with `REJECTED` status.
+Re-submit verification documents after rejection. Exclusively for accounts with `REJECTED` status.
 
 **Authentication**: Required (Bearer token)
 
@@ -538,7 +539,7 @@ curl -X POST http://localhost:5656/api/verification/resubmit \
 ```json
 {
   "success": true,
-  "message": "Verification documents resubmitted successfully. Your account will be reviewed again by our team."
+  "message": "Verification documents submitted successfully. Your account will be reviewed by our team."
 }
 ```
 
@@ -547,14 +548,14 @@ curl -X POST http://localhost:5656/api/verification/resubmit \
 ```json
 {
   "success": false,
-  "message": "Only rejected accounts can resubmit verification"
+  "message": "Account is not eligible for verification"
 }
 ```
 
 **Important**:
-- Only works for accounts with `REJECTED` status
+- Only works for accounts with `REJECTED` status (use `/submit` for first-time submissions)
 - Account status automatically changes back to `PENDING_VERIFICATION`
-- Previous rejection notes are cleared
+- Previous verification data (notes, timestamps) is cleared
 - Old document paths are replaced with new uploads
 
 ---
@@ -563,9 +564,41 @@ curl -X POST http://localhost:5656/api/verification/resubmit \
 
 All admin endpoints require authentication with an ADMIN role user. Attempting to access these endpoints without proper role will result in a 403 Forbidden error.
 
+> **Document Images**: ID document images are served as static files at `GET /uploads/verifications/<filename>`. Use the `idDocumentFrontPath` and `idDocumentBackPath` values returned from the API to construct the full URL: `http://localhost:5656/<path>`
+
+---
+
+### GET /api/admin/verifications
+
+Get a list of all MED users who have submitted verification documents. Used to populate the admin's MED user list screen.
+
+**Authentication**: Required (Bearer token - ADMIN role)
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "MED users retrieved successfully",
+  "data": [
+    {
+      "id": "user-uuid",
+      "fullName": "Dr. Jane Smith",
+      "email": "jane.smith@example.com",
+      "phoneNumber": "+14155552671",
+      "medicalLicenseNumber": "MED123456",
+      "accountStatus": "PENDING_VERIFICATION",
+      "createdAt": "2025-01-29T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
 ### GET /api/admin/verifications/pending
 
-Get list of pending verifications.
+Get list of MED users who have submitted documents and are specifically awaiting review. Subset of the list above filtered to `PENDING_VERIFICATION` only.
 
 **Authentication**: Required (Bearer token - ADMIN role)
 
@@ -592,20 +625,62 @@ Get list of pending verifications.
 
 ---
 
-### POST /api/admin/verifications/approve
+### GET /api/admin/verifications/:userId
 
-Approve a MED user's verification.
+Get full details of a specific MED user. Used when the admin taps on a user from the list to view their profile, license number, and uploaded ID images before making a decision.
 
 **Authentication**: Required (Bearer token - ADMIN role)
 
-**Request Body**
+**URL Parameter**: `userId` — the ID of the MED user
+
+**Success Response** (200)
 
 ```json
 {
-  "userId": "user-uuid",
-  "notes": "All documents verified successfully"
+  "success": true,
+  "message": "MED user retrieved successfully",
+  "data": {
+    "id": "user-uuid",
+    "fullName": "Dr. Jane Smith",
+    "email": "jane.smith@example.com",
+    "phoneNumber": "+14155552671",
+    "medicalLicenseNumber": "MED123456",
+    "idDocumentFrontPath": "uploads/verifications/user-uuid_1234567890_idDocumentFront.jpg",
+    "idDocumentBackPath": "uploads/verifications/user-uuid_1234567890_idDocumentBack.jpg",
+    "accountStatus": "PENDING_VERIFICATION",
+    "hasSubmittedVerification": true,
+    "verifiedAt": null,
+    "createdAt": "2025-01-29T12:00:00.000Z"
+  }
 }
 ```
+
+To load the ID images in the admin UI, construct the full image URLs as:
+```
+http://localhost:5656/<idDocumentFrontPath>
+http://localhost:5656/<idDocumentBackPath>
+```
+
+**Error Response** (400)
+
+```json
+{
+  "success": false,
+  "message": "User not found"
+}
+```
+
+---
+
+### POST /api/admin/verifications/:userId/approve
+
+Approve a MED user's verification. Triggered when admin clicks the Approve button on the detail screen.
+
+**Authentication**: Required (Bearer token - ADMIN role)
+
+**URL Parameter**: `userId` — the ID of the MED user to approve
+
+**Request Body**: None
 
 **Success Response** (200)
 
@@ -616,31 +691,19 @@ Approve a MED user's verification.
 }
 ```
 
-**Note**: User receives an email notification upon approval and account status becomes `ACTIVE`.
+**Note**: User receives a simple approval email notification and `accountStatus` becomes `ACTIVE`.
 
 ---
 
-### POST /api/admin/verifications/reject
+### POST /api/admin/verifications/:userId/reject
 
-Reject a MED user's verification.
+Reject a MED user's verification. Triggered when admin clicks the Reject button on the detail screen.
 
 **Authentication**: Required (Bearer token - ADMIN role)
 
-**Request Body**
+**URL Parameter**: `userId` — the ID of the MED user to reject
 
-```json
-{
-  "userId": "user-uuid",
-  "notes": "Medical license number could not be verified"
-}
-```
-
-**Validation Rules**
-
-| Field | Rules |
-|-------|-------|
-| userId | Required |
-| notes | Required (rejection reason) |
+**Request Body**: None
 
 **Success Response** (200)
 
@@ -651,7 +714,7 @@ Reject a MED user's verification.
 }
 ```
 
-**Note**: User receives an email notification with the rejection reason and account status becomes `REJECTED`.
+**Note**: User receives a simple rejection email notification and `accountStatus` becomes `REJECTED`.
 
 ---
 
