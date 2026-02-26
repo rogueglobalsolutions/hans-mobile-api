@@ -20,24 +20,53 @@ enum AccountStatus {
   SUSPENDED
 }
 
+enum TrainingType {
+  ONLINE
+  HANDS_ON
+}
+
+enum TrainingBrand {
+  MINT_LIFT_PDO_THREADS
+  MINT_MICROCANNULA
+  KLARDIE
+  TARGETCOOL
+  EZ_TCON
+}
+
+enum TrainingLevel {
+  MINT_LIFT_GROUP_TRAINING
+  SUPPLEMENTAL
+  ADVANCED
+  PACKAGE_BUNDLE_1
+  PACKAGE_BUNDLE_2
+}
+
+enum CreditTransactionType {
+  EARNED // Credit added — e.g. enrolled in a training
+  SPENT  // Credit deducted — e.g. store purchase
+}
+
 model User {
-  id                        String        @id @default(uuid())
+  id                        String               @id @default(uuid())
   fullName                  String
-  email                     String        @unique
-  phoneNumber               String        @unique
+  email                     String               @unique
+  phoneNumber               String               @unique
   password                  String
-  role                      Role          @default(USER)
-  accountStatus             AccountStatus @default(ACTIVE)
-  hasSubmittedVerification  Boolean       @default(false)
+  role                      Role                 @default(USER)
+  accountStatus             AccountStatus        @default(ACTIVE)
+  hasSubmittedVerification  Boolean              @default(false)
   medicalLicenseNumber      String?
   idDocumentFrontPath       String?
   idDocumentBackPath        String?
   verificationNotes         String?
   verifiedAt                DateTime?
   verifiedBy                String?
-  createdAt                 DateTime      @default(now())
-  updatedAt                 DateTime      @updatedAt
+  creditBalance             Int                  @default(0) // Running credit score balance
+  createdAt                 DateTime             @default(now())
+  updatedAt                 DateTime             @updatedAt
   otps                      Otp[]
+  enrollments               Enrollment[]
+  creditTransactions        CreditTransaction[]
 }
 
 model Otp {
@@ -48,4 +77,49 @@ model Otp {
   expiresAt DateTime
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
+}
+
+model Training {
+  id                  String        @id @default(uuid())
+  type                TrainingType
+  brand               TrainingBrand
+  level               TrainingLevel
+  learningFormats     Json          // String[] — validated values: "DEMO" | "DIDACTIC" | "DISCUSSION"
+  title               String
+  speaker             String
+  speakerIntro        String
+  productsUsed        String?
+  areasCovered        String
+  description         String
+  backgroundImagePath String?
+  location            String?       // e.g. "Morristown, NJ"
+  scheduledAt         DateTime?     // When the training is scheduled
+  price               Int           // USD — auto-populated from level at creation
+  creditScore         Int           // In-house currency earned on enrollment — auto-populated from level
+  createdBy           String        // admin userId
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  enrollments         Enrollment[]
+}
+
+model Enrollment {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trainingId String
+  training   Training @relation(fields: [trainingId], references: [id], onDelete: Cascade)
+  enrolledAt DateTime @default(now())
+
+  @@unique([userId, trainingId])
+}
+
+model CreditTransaction {
+  id          String                @id @default(uuid())
+  userId      String
+  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        CreditTransactionType
+  amount      Int                   // Always positive — type determines direction
+  description String                // Human-readable e.g. "Enrolled in Advanced PDO Thread Techniques"
+  referenceId String?               // Optional — trainingId, orderId, etc.
+  createdAt   DateTime              @default(now())
 }

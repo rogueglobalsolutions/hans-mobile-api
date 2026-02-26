@@ -718,6 +718,354 @@ Reject a MED user's verification. Triggered when admin clicks the Reject button 
 
 ---
 
+---
+
+## Training Endpoints
+
+Trainings are medical education sessions created by admins and visible to MED users. Enrollment is tracked per user per training.
+
+### Enum Value Reference
+
+All enum fields accept and return **display labels** (not raw DB identifiers). The mapping is:
+
+#### type
+| Display Label | Internal Value |
+|---|---|
+| `Online Training` | `ONLINE` |
+| `Hands on Training` | `HANDS_ON` |
+
+#### brand
+| Display Label | Internal Value |
+|---|---|
+| `MINT Lift® PDO Threads` | `MINT_LIFT_PDO_THREADS` |
+| `MINT™ Microcannula` | `MINT_MICROCANNULA` |
+| `klárdie` | `KLARDIE` |
+| `TargetCool` | `TARGETCOOL` |
+| `EZ-Tcon` | `EZ_TCON` |
+
+#### level
+Selecting a level automatically sets the training's `price` (USD) and `creditScore` (in-house currency). These are read-only on the client — you cannot override them.
+
+| Display Label | Internal Value | Price (USD) | Credit Score |
+|---|---|---|---|
+| `Mint Lift Group Training` | `MINT_LIFT_GROUP_TRAINING` | $3,000 | 1,500 |
+| `Supplemental` | `SUPPLEMENTAL` | $1,500 | 0 |
+| `Advanced` | `ADVANCED` | $6,000 | 3,000 |
+| `Package Bundle 1` | `PACKAGE_BUNDLE_1` | $5,000 | 2,500 |
+| `Package Bundle 2` | `PACKAGE_BUNDLE_2` | $8,000 | 4,500 |
+
+#### learningFormats (array)
+| Display Label | Internal Value |
+|---|---|
+| `Demo` | `DEMO` |
+| `Didactic` | `DIDACTIC` |
+| `Discussion` | `DISCUSSION` |
+
+---
+
+### POST /api/admin/trainings *(Admin only)*
+
+Create a new training. Immediately published and visible to MED users.
+
+**Authentication**: Required (Bearer token — ADMIN role)
+
+**Request**: `multipart/form-data`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | Display label, e.g. `"Online Training"` |
+| `brand` | string | Yes | Display label, e.g. `"MINT Lift® PDO Threads"` |
+| `level` | string | Yes | Display label, e.g. `"Supplemental"` |
+| `learningFormats` | string[] (JSON) | Yes | Array of display labels, e.g. `["Demo","Didactic"]` |
+| `title` | string | Yes | Training title |
+| `speaker` | string | Yes | Speaker name |
+| `speakerIntro` | string | Yes | Speaker biography / introduction |
+| `productsUsed` | string | No | Products used in the training |
+| `areasCovered` | string | Yes | Body areas or topics covered |
+| `description` | string | Yes | Full training description |
+| `location` | string | Yes | Venue / city, e.g. `"Morristown, NJ"` |
+| `scheduledAt` | string (ISO 8601) | Yes | Date and time of the training, e.g. `"2026-03-15T09:00:00.000Z"` |
+| `backgroundImage` | file | No | Background photo (JPEG, PNG, WebP, max 10 MB) |
+
+> **Note on `learningFormats`**: When sending as `multipart/form-data`, the array must be serialized as a JSON string in the form field, then parsed server-side. Example: `learningFormats=["Demo","Didactic"]`
+
+**Example using cURL**:
+
+```bash
+curl -X POST http://localhost:5656/api/admin/trainings \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "type=Online Training" \
+  -F "brand=MINT Lift® PDO Threads" \
+  -F "level=Supplemental" \
+  -F 'learningFormats=["Demo","Didactic"]' \
+  -F "title=Advanced PDO Thread Techniques" \
+  -F "speaker=Dr. Jane Smith" \
+  -F "speakerIntro=Dr. Smith is a board-certified dermatologist with 15 years of experience." \
+  -F "productsUsed=MINT Lift 23G Bi-directional" \
+  -F "areasCovered=Midface, Jawline, Neck" \
+  -F "description=A comprehensive hands-on training covering advanced PDO thread placement techniques." \
+  -F "location=Morristown, NJ" \
+  -F "scheduledAt=2026-03-15T09:00:00.000Z" \
+  -F "backgroundImage=@/path/to/photo.jpg"
+```
+
+**Success Response** (201)
+
+```json
+{
+  "success": true,
+  "message": "Training created successfully",
+  "data": {
+    "id": "training-uuid",
+    "type": "Online Training",
+    "brand": "MINT Lift® PDO Threads",
+    "level": "Supplemental",
+    "learningFormats": ["Demo", "Didactic"],
+    "title": "Advanced PDO Thread Techniques",
+    "speaker": "Dr. Jane Smith",
+    "speakerIntro": "Dr. Smith is a board-certified dermatologist...",
+    "productsUsed": "MINT Lift 23G Bi-directional",
+    "areasCovered": "Midface, Jawline, Neck",
+    "description": "A comprehensive hands-on training...",
+    "backgroundImagePath": "uploads/trainings-bg-img/training_1234567890.jpg",
+    "location": "Morristown, NJ",
+    "scheduledAt": "2026-03-15T09:00:00.000Z",
+    "price": 1500,
+    "creditScore": 0,
+    "createdBy": "admin-user-uuid",
+    "createdAt": "2026-02-26T12:00:00.000Z",
+    "updatedAt": "2026-02-26T12:00:00.000Z"
+  }
+}
+```
+
+> **Note on `price` and `creditScore`**: These are set automatically by the server based on the chosen `level`. They are **not** accepted as request fields — any values sent will be ignored.
+
+**Error Response** (400)
+
+```json
+{
+  "success": false,
+  "message": "Validation failed",
+  "errors": [
+    "type is required",
+    "learningFormats must be a non-empty array"
+  ]
+}
+```
+
+> **Background image URL**: To display the background image, construct the full URL as `http://localhost:5656/<backgroundImagePath>`.
+
+---
+
+### GET /api/trainings *(MED and ADMIN)*
+
+List all trainings. Returns a summary view — no enrollment details.
+
+**Authentication**: Required (Bearer token — MED or ADMIN role)
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Trainings retrieved successfully",
+  "data": [
+    {
+      "id": "training-uuid",
+      "type": "Online Training",
+      "brand": "MINT Lift® PDO Threads",
+      "level": "Supplemental",
+      "learningFormats": ["Demo", "Didactic"],
+      "title": "Advanced PDO Thread Techniques",
+      "speaker": "Dr. Jane Smith",
+      "backgroundImagePath": "uploads/trainings-bg-img/training_1234567890.jpg",
+      "location": "Morristown, NJ",
+      "scheduledAt": "2026-03-15T09:00:00.000Z",
+      "price": 1500,
+      "creditScore": 0,
+      "createdAt": "2026-02-26T12:00:00.000Z",
+      "_count": { "enrollments": 12 }
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/trainings/:id *(MED and ADMIN)*
+
+Get full details of a training including whether the authenticated user is enrolled.
+
+**Authentication**: Required (Bearer token — MED or ADMIN role)
+
+**URL Parameter**: `id` — training UUID
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Training retrieved successfully",
+  "data": {
+    "id": "training-uuid",
+    "type": "Online Training",
+    "brand": "MINT Lift® PDO Threads",
+    "level": "Supplemental",
+    "learningFormats": ["Demo", "Didactic"],
+    "title": "Advanced PDO Thread Techniques",
+    "speaker": "Dr. Jane Smith",
+    "speakerIntro": "Dr. Smith is a board-certified dermatologist...",
+    "productsUsed": "MINT Lift 23G Bi-directional",
+    "areasCovered": "Midface, Jawline, Neck",
+    "description": "A comprehensive hands-on training...",
+    "backgroundImagePath": "uploads/trainings-bg-img/training_1234567890.jpg",
+    "location": "Morristown, NJ",
+    "scheduledAt": "2026-03-15T09:00:00.000Z",
+    "price": 1500,
+    "creditScore": 0,
+    "createdBy": "admin-user-uuid",
+    "createdAt": "2026-02-26T12:00:00.000Z",
+    "updatedAt": "2026-02-26T12:00:00.000Z",
+    "isEnrolled": false,
+    "_count": { "enrollments": 12 }
+  }
+}
+```
+
+**Error Response** (404)
+
+```json
+{
+  "success": false,
+  "message": "Training not found"
+}
+```
+
+---
+
+### POST /api/trainings/:id/enroll *(MED only)*
+
+Enroll the authenticated MED user in a training. Idempotent — calling it again if already enrolled is a no-op and still returns success.
+
+**Authentication**: Required (Bearer token — MED role)
+
+**URL Parameter**: `id` — training UUID
+
+**Request Body**: None
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Enrolled successfully"
+}
+```
+
+**Error Response** (404)
+
+```json
+{
+  "success": false,
+  "message": "Training not found"
+}
+```
+
+---
+
+### Training Background Images
+
+Background images are stored at `uploads/trainings-bg-img/` on the server filesystem. To display them in the app, construct the full URL as:
+
+```
+http://localhost:5656/<backgroundImagePath>
+```
+
+Example:
+```
+http://localhost:5656/uploads/trainings-bg-img/training_1706270400000.jpg
+```
+
+---
+
+## Credit Endpoints
+
+MED users earn credit score (in-house currency) each time they enroll in a training. Credits can later be spent in the store. This section covers the read side — tracking balance and history.
+
+### How Credits Work
+
+| Event | Effect |
+|---|---|
+| User enrolls in a training with `creditScore > 0` | `creditBalance` incremented; `EARNED` transaction recorded |
+| User enrolls again in the same training | No-op — no duplicate credit awarded |
+| Training with `creditScore = 0` (Supplemental) | Enrollment created; no credit transaction |
+| Future store purchase | `creditBalance` decremented; `SPENT` transaction recorded |
+
+> Credit balance is stored on the `User` row and updated atomically with each transaction, so the balance is always consistent with the transaction ledger.
+
+---
+
+### GET /api/credits *(MED only)*
+
+Returns the authenticated user's current credit balance, aggregated totals, and full transaction history.
+
+**Authentication**: Required (Bearer token — MED role)
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Credit summary retrieved successfully",
+  "data": {
+    "currentBalance": 4500,
+    "totalEarned": 6000,
+    "totalSpent": 1500,
+    "transactions": [
+      {
+        "id": "txn-uuid-1",
+        "type": "EARNED",
+        "amount": 3000,
+        "description": "Enrolled in Advanced PDO Thread Techniques",
+        "referenceId": "training-uuid",
+        "createdAt": "2026-02-26T14:00:00.000Z"
+      },
+      {
+        "id": "txn-uuid-2",
+        "type": "SPENT",
+        "amount": 1500,
+        "description": "Store purchase: MINT Lift® Kit",
+        "referenceId": "order-uuid",
+        "createdAt": "2026-02-25T10:30:00.000Z"
+      },
+      {
+        "id": "txn-uuid-3",
+        "type": "EARNED",
+        "amount": 3000,
+        "description": "Enrolled in Advanced PDO Thread Techniques",
+        "referenceId": "training-uuid-2",
+        "createdAt": "2026-02-20T09:00:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+**Field Reference**
+
+| Field | Type | Description |
+|---|---|---|
+| `currentBalance` | int | Current spendable credit balance |
+| `totalEarned` | int | Lifetime credits earned across all enrollments |
+| `totalSpent` | int | Lifetime credits spent (store purchases, etc.) |
+| `transactions[].type` | `EARNED` \| `SPENT` | Direction of the transaction |
+| `transactions[].amount` | int | Always positive — `type` indicates direction |
+| `transactions[].description` | string | Human-readable label |
+| `transactions[].referenceId` | string \| null | Source ID (training UUID, order ID, etc.) |
+
+---
+
 ## Error Codes
 
 | HTTP Status | Meaning |
@@ -727,4 +1075,5 @@ Reject a MED user's verification. Triggered when admin clicks the Reject button 
 | 400 | Bad Request (validation error) |
 | 401 | Unauthorized (invalid credentials or token) |
 | 403 | Forbidden (valid token but insufficient permissions) |
+| 404 | Not Found |
 | 500 | Internal Server Error |
