@@ -12,6 +12,7 @@ const SAFE_MESSAGES: Record<string, string> = {
   "User is not pending verification": "User is not pending verification",
   "Only rejected accounts can resubmit verification": "Only rejected accounts can resubmit verification",
   "Insufficient permissions": "Insufficient permissions",
+  "User is not a MED user": "User is not a MED user",
 };
 
 const FALLBACK_MESSAGES: Record<string, string> = {
@@ -25,6 +26,8 @@ const FALLBACK_MESSAGES: Record<string, string> = {
   approveVerification: "Approval failed. Please try again.",
   rejectVerification: "Rejection failed. Please try again.",
   getPendingVerifications: "Failed to retrieve pending verifications.",
+  getMedUsers: "Failed to retrieve MED users.",
+  getMedUserById: "Failed to retrieve user details.",
 };
 
 export function sanitizeError(error: unknown, operation: keyof typeof FALLBACK_MESSAGES): string {

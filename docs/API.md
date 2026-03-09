@@ -39,9 +39,8 @@ For security, error messages are sanitized to prevent internal information leaka
 - "Invalid role"
 - "Account suspended"
 - "User not found"
-- "Account not eligible for verification"
+- "Account is not eligible for verification"
 - "User is not pending verification"
-- "Only rejected accounts can resubmit verification"
 - "Insufficient permissions"
 
 Any other internal errors return generic fallback messages (e.g., "Registration failed. Please try again.") while logging the actual error server-side for debugging.
@@ -101,29 +100,31 @@ MED (Medical Professional) users require identity verification before they can l
    - User receives a bearer token and can log in
 
 2. **Login & App Redirect**: MED user logs in
-   - Login succeeds and returns bearer token + `accountStatus`
-   - Mobile app checks `accountStatus` in response:
-     - `PENDING_VERIFICATION` → Redirect to verification upload screen
+   - Login succeeds and returns bearer token + `accountStatus` + `hasSubmittedVerification`
+   - Mobile app uses **both flags** to determine routing:
+     - `PENDING_VERIFICATION` + `hasSubmittedVerification: false` → Redirect to document upload screen
+     - `PENDING_VERIFICATION` + `hasSubmittedVerification: true` → Show "pending review" screen (documents already submitted)
      - `REJECTED` → Redirect to re-submission screen
      - `ACTIVE` → Redirect to main app
 
-3. **Submit Documents**: MED user submits verification documents via `/api/verification/submit`
-   - Front and back images of ID document
-   - Medical license number
+3. **Submit Documents** (first-time): MED user submits verification documents via `POST /api/verification/submit`
+   - Front and back images of ID document + medical license number
    - Documents stored locally in `uploads/verifications/`
+   - Only valid for accounts with `PENDING_VERIFICATION` status
 
 4. **Admin Review**: Admin reviews pending verifications via `/api/admin/verifications/pending`
-   - Approves via `/api/admin/verifications/approve` → Status becomes `ACTIVE`
-   - Rejects via `/api/admin/verifications/reject` → Status becomes `REJECTED`
+   - Approves via `POST /api/admin/verifications/:userId/approve` → Status becomes `ACTIVE`
+   - Rejects via `POST /api/admin/verifications/:userId/reject` → Status becomes `REJECTED`
 
 5. **Email Notification**: User receives email notification of approval/rejection
 
 6. **Re-login After Status Change**:
    - If **approved**, next login redirects to main app
    - If **rejected**, next login redirects to re-submission screen
-   - User can resubmit via `/api/verification/resubmit`
+   - User resubmits via `POST /api/verification/resubmit`
+     - Only valid for accounts with `REJECTED` status
      - Status changes back to `PENDING_VERIFICATION`
-     - Previous rejection notes are cleared
+     - Previous verification data is cleared
      - Admin reviews again from step 4
 
 ### Document Storage
@@ -282,10 +283,10 @@ The login endpoint returns both `accountStatus` and `hasSubmittedVerification`. 
 
 | accountStatus | hasSubmittedVerification | Action |
 |---------------|--------------------------|--------|
-| `ACTIVE` | `false` | Fully verified USER, redirect to main app |
-| `PENDING_VERIFICATION` | `false` | MED user hasn't uploaded documents yet, redirect to upload screen |
-| `PENDING_VERIFICATION` | `true` | MED user submitted documents, awaiting admin review - show "pending review" modal |
-| `REJECTED` | `true` | MED user's verification was rejected, redirect to re-submission screen |
+| `ACTIVE` | any | Fully verified, redirect to main app |
+| `PENDING_VERIFICATION` | `false` | MED user hasn't uploaded documents yet — redirect to upload screen, hit `POST /api/verification/submit` |
+| `PENDING_VERIFICATION` | `true` | MED user submitted documents, awaiting admin review — show "pending review" screen |
+| `REJECTED` | `true` | MED user's verification was rejected — redirect to re-submission screen, hit `POST /api/verification/resubmit` |
 | `SUSPENDED` | N/A | Login blocked with error (only this status prevents login) |
 
 **Example Login Flow:**
@@ -302,14 +303,14 @@ if (user.accountStatus === 'ACTIVE') {
   navigate('/home');
 } else if (user.accountStatus === 'PENDING_VERIFICATION') {
   if (!user.hasSubmittedVerification) {
-    // Haven't uploaded documents yet - allow access to upload screen
+    // Haven't uploaded documents yet — go to upload screen (hits /submit)
     navigate('/verification/upload');
   } else {
-    // Documents submitted, awaiting review - block access, show modal
-    showModal('Your documents are under review. Please check back later.');
+    // Documents submitted, awaiting review — show pending screen
+    navigate('/verification/pending');
   }
 } else if (user.accountStatus === 'REJECTED') {
-  // Rejected - allow resubmission
+  // Rejected — go to resubmission screen (hits /resubmit with isResubmission: true)
   navigate('/verification/resubmit');
 }
 ```
@@ -511,7 +512,7 @@ curl -X POST http://localhost:5656/api/verification/submit \
 
 ### POST /api/verification/resubmit
 
-Re-submit verification documents after rejection. Only available for accounts with `REJECTED` status.
+Re-submit verification documents after rejection. Exclusively for accounts with `REJECTED` status.
 
 **Authentication**: Required (Bearer token)
 
@@ -538,7 +539,7 @@ curl -X POST http://localhost:5656/api/verification/resubmit \
 ```json
 {
   "success": true,
-  "message": "Verification documents resubmitted successfully. Your account will be reviewed again by our team."
+  "message": "Verification documents submitted successfully. Your account will be reviewed by our team."
 }
 ```
 
@@ -547,14 +548,14 @@ curl -X POST http://localhost:5656/api/verification/resubmit \
 ```json
 {
   "success": false,
-  "message": "Only rejected accounts can resubmit verification"
+  "message": "Account is not eligible for verification"
 }
 ```
 
 **Important**:
-- Only works for accounts with `REJECTED` status
+- Only works for accounts with `REJECTED` status (use `/submit` for first-time submissions)
 - Account status automatically changes back to `PENDING_VERIFICATION`
-- Previous rejection notes are cleared
+- Previous verification data (notes, timestamps) is cleared
 - Old document paths are replaced with new uploads
 
 ---
@@ -563,9 +564,41 @@ curl -X POST http://localhost:5656/api/verification/resubmit \
 
 All admin endpoints require authentication with an ADMIN role user. Attempting to access these endpoints without proper role will result in a 403 Forbidden error.
 
+> **Document Images**: ID document images are served as static files at `GET /uploads/verifications/<filename>`. Use the `idDocumentFrontPath` and `idDocumentBackPath` values returned from the API to construct the full URL: `http://localhost:5656/<path>`
+
+---
+
+### GET /api/admin/verifications
+
+Get a list of all MED users who have submitted verification documents. Used to populate the admin's MED user list screen.
+
+**Authentication**: Required (Bearer token - ADMIN role)
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "MED users retrieved successfully",
+  "data": [
+    {
+      "id": "user-uuid",
+      "fullName": "Dr. Jane Smith",
+      "email": "jane.smith@example.com",
+      "phoneNumber": "+14155552671",
+      "medicalLicenseNumber": "MED123456",
+      "accountStatus": "PENDING_VERIFICATION",
+      "createdAt": "2025-01-29T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
 ### GET /api/admin/verifications/pending
 
-Get list of pending verifications.
+Get list of MED users who have submitted documents and are specifically awaiting review. Subset of the list above filtered to `PENDING_VERIFICATION` only.
 
 **Authentication**: Required (Bearer token - ADMIN role)
 
@@ -592,20 +625,62 @@ Get list of pending verifications.
 
 ---
 
-### POST /api/admin/verifications/approve
+### GET /api/admin/verifications/:userId
 
-Approve a MED user's verification.
+Get full details of a specific MED user. Used when the admin taps on a user from the list to view their profile, license number, and uploaded ID images before making a decision.
 
 **Authentication**: Required (Bearer token - ADMIN role)
 
-**Request Body**
+**URL Parameter**: `userId` — the ID of the MED user
+
+**Success Response** (200)
 
 ```json
 {
-  "userId": "user-uuid",
-  "notes": "All documents verified successfully"
+  "success": true,
+  "message": "MED user retrieved successfully",
+  "data": {
+    "id": "user-uuid",
+    "fullName": "Dr. Jane Smith",
+    "email": "jane.smith@example.com",
+    "phoneNumber": "+14155552671",
+    "medicalLicenseNumber": "MED123456",
+    "idDocumentFrontPath": "uploads/verifications/user-uuid_1234567890_idDocumentFront.jpg",
+    "idDocumentBackPath": "uploads/verifications/user-uuid_1234567890_idDocumentBack.jpg",
+    "accountStatus": "PENDING_VERIFICATION",
+    "hasSubmittedVerification": true,
+    "verifiedAt": null,
+    "createdAt": "2025-01-29T12:00:00.000Z"
+  }
 }
 ```
+
+To load the ID images in the admin UI, construct the full image URLs as:
+```
+http://localhost:5656/<idDocumentFrontPath>
+http://localhost:5656/<idDocumentBackPath>
+```
+
+**Error Response** (400)
+
+```json
+{
+  "success": false,
+  "message": "User not found"
+}
+```
+
+---
+
+### POST /api/admin/verifications/:userId/approve
+
+Approve a MED user's verification. Triggered when admin clicks the Approve button on the detail screen.
+
+**Authentication**: Required (Bearer token - ADMIN role)
+
+**URL Parameter**: `userId` — the ID of the MED user to approve
+
+**Request Body**: None
 
 **Success Response** (200)
 
@@ -616,31 +691,19 @@ Approve a MED user's verification.
 }
 ```
 
-**Note**: User receives an email notification upon approval and account status becomes `ACTIVE`.
+**Note**: User receives a simple approval email notification and `accountStatus` becomes `ACTIVE`.
 
 ---
 
-### POST /api/admin/verifications/reject
+### POST /api/admin/verifications/:userId/reject
 
-Reject a MED user's verification.
+Reject a MED user's verification. Triggered when admin clicks the Reject button on the detail screen.
 
 **Authentication**: Required (Bearer token - ADMIN role)
 
-**Request Body**
+**URL Parameter**: `userId` — the ID of the MED user to reject
 
-```json
-{
-  "userId": "user-uuid",
-  "notes": "Medical license number could not be verified"
-}
-```
-
-**Validation Rules**
-
-| Field | Rules |
-|-------|-------|
-| userId | Required |
-| notes | Required (rejection reason) |
+**Request Body**: None
 
 **Success Response** (200)
 
@@ -651,7 +714,488 @@ Reject a MED user's verification.
 }
 ```
 
-**Note**: User receives an email notification with the rejection reason and account status becomes `REJECTED`.
+**Note**: User receives a simple rejection email notification and `accountStatus` becomes `REJECTED`.
+
+---
+
+---
+
+## Training Endpoints
+
+Trainings are medical education sessions created by admins and visible to MED users. Enrollment is tracked per user per training.
+
+### Enum Value Reference
+
+All enum fields accept and return **display labels** (not raw DB identifiers). The mapping is:
+
+#### type
+| Display Label | Internal Value |
+|---|---|
+| `Online Training` | `ONLINE` |
+| `Hands on Training` | `HANDS_ON` |
+
+#### brand
+| Display Label | Internal Value |
+|---|---|
+| `MINT Lift® PDO Threads` | `MINT_LIFT_PDO_THREADS` |
+| `MINT™ Microcannula` | `MINT_MICROCANNULA` |
+| `klárdie` | `KLARDIE` |
+| `TargetCool` | `TARGETCOOL` |
+| `EZ-Tcon` | `EZ_TCON` |
+
+#### level
+Selecting a level automatically sets the training's `price` (USD) and `creditScore` (in-house currency). These are read-only on the client — you cannot override them.
+
+| Display Label | Internal Value | Price (USD) | Credit Score |
+|---|---|---|---|
+| `Mint Lift Group Training` | `MINT_LIFT_GROUP_TRAINING` | $3,000 | 1,500 |
+| `Supplemental` | `SUPPLEMENTAL` | $1,500 | 0 |
+| `Advanced` | `ADVANCED` | $6,000 | 3,000 |
+| `Package Bundle 1` | `PACKAGE_BUNDLE_1` | $5,000 | 2,500 |
+| `Package Bundle 2` | `PACKAGE_BUNDLE_2` | $8,000 | 4,500 |
+
+#### learningFormats (array)
+| Display Label | Internal Value |
+|---|---|
+| `Demo` | `DEMO` |
+| `Didactic` | `DIDACTIC` |
+| `Discussion` | `DISCUSSION` |
+
+---
+
+### POST /api/admin/trainings *(Admin only)*
+
+Create a new training. Immediately published and visible to MED users.
+
+**Authentication**: Required (Bearer token — ADMIN role)
+
+**Request**: `multipart/form-data`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | Display label, e.g. `"Online Training"` |
+| `brand` | string | Yes | Display label, e.g. `"MINT Lift® PDO Threads"` |
+| `level` | string | Yes | Display label, e.g. `"Supplemental"` |
+| `learningFormats` | string[] (JSON) | Yes | Array of display labels, e.g. `["Demo","Didactic"]` |
+| `title` | string | Yes | Training title |
+| `speaker` | string | Yes | Speaker name |
+| `speakerIntro` | string | Yes | Speaker biography / introduction |
+| `productsUsed` | string | No | Products used in the training |
+| `areasCovered` | string | Yes | Body areas or topics covered |
+| `description` | string | Yes | Full training description |
+| `location` | string | Yes | Venue / city, e.g. `"Morristown, NJ"` |
+| `scheduledAt` | string (ISO 8601) | Yes | Date and time of the training, e.g. `"2026-03-15T09:00:00.000Z"` |
+| `backgroundImage` | file | No | Background photo (JPEG, PNG, WebP, max 10 MB) |
+
+> **Note on `learningFormats`**: When sending as `multipart/form-data`, the array must be serialized as a JSON string in the form field, then parsed server-side. Example: `learningFormats=["Demo","Didactic"]`
+
+**Example using cURL**:
+
+```bash
+curl -X POST http://localhost:5656/api/admin/trainings \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "type=Online Training" \
+  -F "brand=MINT Lift® PDO Threads" \
+  -F "level=Supplemental" \
+  -F 'learningFormats=["Demo","Didactic"]' \
+  -F "title=Advanced PDO Thread Techniques" \
+  -F "speaker=Dr. Jane Smith" \
+  -F "speakerIntro=Dr. Smith is a board-certified dermatologist with 15 years of experience." \
+  -F "productsUsed=MINT Lift 23G Bi-directional" \
+  -F "areasCovered=Midface, Jawline, Neck" \
+  -F "description=A comprehensive hands-on training covering advanced PDO thread placement techniques." \
+  -F "location=Morristown, NJ" \
+  -F "scheduledAt=2026-03-15T09:00:00.000Z" \
+  -F "backgroundImage=@/path/to/photo.jpg"
+```
+
+**Success Response** (201)
+
+```json
+{
+  "success": true,
+  "message": "Training created successfully",
+  "data": {
+    "id": "training-uuid",
+    "type": "Online Training",
+    "brand": "MINT Lift® PDO Threads",
+    "level": "Supplemental",
+    "learningFormats": ["Demo", "Didactic"],
+    "title": "Advanced PDO Thread Techniques",
+    "speaker": "Dr. Jane Smith",
+    "speakerIntro": "Dr. Smith is a board-certified dermatologist...",
+    "productsUsed": "MINT Lift 23G Bi-directional",
+    "areasCovered": "Midface, Jawline, Neck",
+    "description": "A comprehensive hands-on training...",
+    "backgroundImagePath": "uploads/trainings-bg-img/training_1234567890.jpg",
+    "location": "Morristown, NJ",
+    "scheduledAt": "2026-03-15T09:00:00.000Z",
+    "price": 1500,
+    "creditScore": 0,
+    "createdBy": "admin-user-uuid",
+    "createdAt": "2026-02-26T12:00:00.000Z",
+    "updatedAt": "2026-02-26T12:00:00.000Z"
+  }
+}
+```
+
+> **Note on `price` and `creditScore`**: These are set automatically by the server based on the chosen `level`. They are **not** accepted as request fields — any values sent will be ignored.
+
+**Error Response** (400)
+
+```json
+{
+  "success": false,
+  "message": "Validation failed",
+  "errors": [
+    "type is required",
+    "learningFormats must be a non-empty array"
+  ]
+}
+```
+
+> **Background image URL**: To display the background image, construct the full URL as `http://localhost:5656/<backgroundImagePath>`.
+
+---
+
+### GET /api/trainings *(MED and ADMIN)*
+
+List all trainings. Returns a summary view — no enrollment details.
+
+**Authentication**: Required (Bearer token — MED or ADMIN role)
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Trainings retrieved successfully",
+  "data": [
+    {
+      "id": "training-uuid",
+      "type": "Online Training",
+      "brand": "MINT Lift® PDO Threads",
+      "level": "Supplemental",
+      "learningFormats": ["Demo", "Didactic"],
+      "title": "Advanced PDO Thread Techniques",
+      "speaker": "Dr. Jane Smith",
+      "backgroundImagePath": "uploads/trainings-bg-img/training_1234567890.jpg",
+      "location": "Morristown, NJ",
+      "scheduledAt": "2026-03-15T09:00:00.000Z",
+      "price": 1500,
+      "creditScore": 0,
+      "createdAt": "2026-02-26T12:00:00.000Z",
+      "_count": { "enrollments": 12 }
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/trainings/:id *(MED and ADMIN)*
+
+Get full details of a training including whether the authenticated user is enrolled.
+
+**Authentication**: Required (Bearer token — MED or ADMIN role)
+
+**URL Parameter**: `id` — training UUID
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Training retrieved successfully",
+  "data": {
+    "id": "training-uuid",
+    "type": "Online Training",
+    "brand": "MINT Lift® PDO Threads",
+    "level": "Supplemental",
+    "learningFormats": ["Demo", "Didactic"],
+    "title": "Advanced PDO Thread Techniques",
+    "speaker": "Dr. Jane Smith",
+    "speakerIntro": "Dr. Smith is a board-certified dermatologist...",
+    "productsUsed": "MINT Lift 23G Bi-directional",
+    "areasCovered": "Midface, Jawline, Neck",
+    "description": "A comprehensive hands-on training...",
+    "backgroundImagePath": "uploads/trainings-bg-img/training_1234567890.jpg",
+    "location": "Morristown, NJ",
+    "scheduledAt": "2026-03-15T09:00:00.000Z",
+    "price": 1500,
+    "creditScore": 0,
+    "createdBy": "admin-user-uuid",
+    "createdAt": "2026-02-26T12:00:00.000Z",
+    "updatedAt": "2026-02-26T12:00:00.000Z",
+    "isEnrolled": false,
+    "_count": { "enrollments": 12 }
+  }
+}
+```
+
+**Error Response** (404)
+
+```json
+{
+  "success": false,
+  "message": "Training not found"
+}
+```
+
+---
+
+### POST /api/trainings/:id/enroll *(MED only)*
+
+Enroll the authenticated MED user in a training. Idempotent — calling it again if already enrolled is a no-op and still returns success.
+
+**Authentication**: Required (Bearer token — MED role)
+
+**URL Parameter**: `id` — training UUID
+
+**Request Body**: None
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Enrolled successfully"
+}
+```
+
+**Error Response** (404)
+
+```json
+{
+  "success": false,
+  "message": "Training not found"
+}
+```
+
+---
+
+### Training Background Images
+
+Background images are stored at `uploads/trainings-bg-img/` on the server filesystem. To display them in the app, construct the full URL as:
+
+```
+http://localhost:5656/<backgroundImagePath>
+```
+
+Example:
+```
+http://localhost:5656/uploads/trainings-bg-img/training_1706270400000.jpg
+```
+
+---
+
+## Credit Endpoints
+
+MED users earn credit score (in-house currency) each time they enroll in a training. Credits can later be spent in the store. This section covers the read side — tracking balance and history.
+
+### How Credits Work
+
+| Event | Effect |
+|---|---|
+| User enrolls in a training with `creditScore > 0` | `creditBalance` incremented; `EARNED` transaction recorded |
+| User enrolls again in the same training | No-op — no duplicate credit awarded |
+| Training with `creditScore = 0` (Supplemental) | Enrollment created; no credit transaction |
+| Future store purchase | `creditBalance` decremented; `SPENT` transaction recorded |
+
+> Credit balance is stored on the `User` row and updated atomically with each transaction, so the balance is always consistent with the transaction ledger.
+
+---
+
+### GET /api/credits *(MED only)*
+
+Returns the authenticated user's current credit balance, aggregated totals, and full transaction history.
+
+**Authentication**: Required (Bearer token — MED role)
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Credit summary retrieved successfully",
+  "data": {
+    "currentBalance": 4500,
+    "totalEarned": 6000,
+    "totalSpent": 1500,
+    "transactions": [
+      {
+        "id": "txn-uuid-1",
+        "type": "EARNED",
+        "amount": 3000,
+        "description": "Enrolled in Advanced PDO Thread Techniques",
+        "referenceId": "training-uuid",
+        "createdAt": "2026-02-26T14:00:00.000Z"
+      },
+      {
+        "id": "txn-uuid-2",
+        "type": "SPENT",
+        "amount": 1500,
+        "description": "Store purchase: MINT Lift® Kit",
+        "referenceId": "order-uuid",
+        "createdAt": "2026-02-25T10:30:00.000Z"
+      },
+      {
+        "id": "txn-uuid-3",
+        "type": "EARNED",
+        "amount": 3000,
+        "description": "Enrolled in Advanced PDO Thread Techniques",
+        "referenceId": "training-uuid-2",
+        "createdAt": "2026-02-20T09:00:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+**Field Reference**
+
+| Field | Type | Description |
+|---|---|---|
+| `currentBalance` | int | Current spendable credit balance |
+| `totalEarned` | int | Lifetime credits earned across all enrollments |
+| `totalSpent` | int | Lifetime credits spent (store purchases, etc.) |
+| `transactions[].type` | `EARNED` \| `SPENT` | Direction of the transaction |
+| `transactions[].amount` | int | Always positive — `type` indicates direction |
+| `transactions[].description` | string | Human-readable label |
+| `transactions[].referenceId` | string \| null | Source ID (training UUID, order ID, etc.) |
+
+---
+
+## Chat (Socket.IO)
+
+The global chat is powered by Socket.IO. All user types (USER, MED, ADMIN) have access. There are no rooms — it's a single shared channel.
+
+**Server URL**: `http://localhost:5656` (same port as the REST API)
+
+### Connection & Authentication
+
+JWT authentication is required. Pass the token in the `auth` option when connecting:
+
+```javascript
+import { io } from "socket.io-client";
+
+const socket = io("http://localhost:5656", {
+  auth: { token: "Bearer YOUR_JWT_TOKEN" }
+});
+```
+
+If the token is missing or invalid, the connection is rejected immediately.
+
+### Events
+
+### POST /api/chat/images
+
+Upload an image to be sent in chat. Returns a relative `imageUrl` to pass as the `imageUrl` field in `send_message`.
+
+**Authentication**: Required (Bearer token)
+
+**Request**: `multipart/form-data`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `image` | file | Yes | Image to send (JPEG, PNG, WebP, max 10MB) |
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Image uploaded successfully",
+  "data": {
+    "imageUrl": "uploads/chat/user-uuid_1234567890.jpg"
+  }
+}
+```
+
+> Construct the full display URL as `http://localhost:5656/<imageUrl>`
+
+---
+
+#### Client → Server
+
+| Event | Payload | Description |
+|---|---|---|
+| `send_message` | `{ message?: string, imageUrl?: string }` | Send a message, image, or both. At least one field required. |
+
+**Constraints:**
+- At least one of `message` or `imageUrl` must be present
+- `message` max 1000 characters
+- `imageUrl` should be the relative path returned by `POST /api/chat/images`
+- Rate limited to 1 message per second per connection
+
+#### Server → Client
+
+| Event | Payload | Description |
+|---|---|---|
+| `chat_history` | `Message[]` | Emitted once on connect — last 50 messages in chronological order |
+| `new_message` | `Message` | Broadcast to all connected clients when any user sends a message |
+| `error` | `{ message: string }` | Emitted back to the sender on validation or rate limit errors |
+
+#### Message Object
+
+```json
+{
+  "id": "msg-uuid",
+  "userId": "user-uuid",
+  "fullName": "Dr. Jane Smith",
+  "profilePicturePath": null,
+  "message": "Hello everyone!",
+  "imageUrl": null,
+  "createdAt": "2026-03-09T12:00:00.000Z"
+}
+```
+
+- `message` and `imageUrl` are both nullable — either or both can be present depending on what was sent
+- Construct full image URLs as `http://localhost:5656/<imageUrl>` and `http://localhost:5656/<profilePicturePath>`
+
+### Example Usage (React Native)
+
+```javascript
+// Connect
+const socket = io("http://localhost:5656", {
+  auth: { token: `Bearer ${userToken}` }
+});
+
+// Load history on connect
+socket.on("chat_history", (messages) => {
+  setMessages(messages);
+});
+
+// Receive new messages in real-time
+socket.on("new_message", (message) => {
+  setMessages((prev) => [...prev, message]);
+});
+
+// Handle errors (validation, rate limit)
+socket.on("error", (err) => {
+  console.error(err.message);
+});
+
+// Send a text message
+socket.emit("send_message", { message: "Hello!" });
+
+// Send an image (upload first, then emit with returned imageUrl)
+const formData = new FormData();
+formData.append("image", { uri, name: "photo.jpg", type: "image/jpeg" });
+const res = await fetch("http://localhost:5656/api/chat/images", {
+  method: "POST",
+  headers: { Authorization: `Bearer ${token}` },
+  body: formData,
+});
+const { data } = await res.json();
+socket.emit("send_message", { imageUrl: data.imageUrl });
+
+// Send both text and image
+socket.emit("send_message", { message: "Check this out!", imageUrl: data.imageUrl });
+
+// Disconnect when leaving the screen
+socket.disconnect();
+```
 
 ---
 
@@ -664,4 +1208,5 @@ Reject a MED user's verification.
 | 400 | Bad Request (validation error) |
 | 401 | Unauthorized (invalid credentials or token) |
 | 403 | Forbidden (valid token but insufficient permissions) |
+| 404 | Not Found |
 | 500 | Internal Server Error |

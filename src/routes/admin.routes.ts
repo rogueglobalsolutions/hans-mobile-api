@@ -1,7 +1,9 @@
 import { Router } from "express";
 import * as verificationController from "../controllers/verification.controller";
+import * as trainingController from "../controllers/training.controller";
 import { authenticateToken, requireRole } from "../middleware/auth";
 import { Role } from "../generated/prisma/enums";
+import { uploadTrainingBg } from "../middleware/upload";
 
 const router = Router();
 
@@ -9,9 +11,24 @@ const router = Router();
 router.use(authenticateToken);
 router.use(requireRole(Role.ADMIN));
 
-// Verification management
+// ─── Verification management ──────────────────────────────────────────────────
+
+// MED user list and detail
+router.get("/verifications", verificationController.getMedUsers);
 router.get("/verifications/pending", verificationController.getPendingVerifications);
-router.post("/verifications/approve", verificationController.approveVerification);
-router.post("/verifications/reject", verificationController.rejectVerification);
+router.get("/verifications/:userId", verificationController.getMedUserById);
+
+// Approve / reject actions on a specific user
+router.post("/verifications/:userId/approve", verificationController.approveVerification);
+router.post("/verifications/:userId/reject", verificationController.rejectVerification);
+
+// ─── Training management ──────────────────────────────────────────────────────
+
+// Create a new training (optional background image upload)
+router.post(
+  "/trainings",
+  uploadTrainingBg.fields([{ name: "backgroundImage", maxCount: 1 }]),
+  trainingController.createTraining,
+);
 
 export default router;

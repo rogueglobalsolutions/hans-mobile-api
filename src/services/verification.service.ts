@@ -18,39 +18,11 @@ export async function submitVerification(input: SubmitVerificationInput) {
     throw new Error("User not found");
   }
 
-  if (user.accountStatus !== AccountStatus.PENDING_VERIFICATION) {
+  const eligibleStatuses: AccountStatus[] = [AccountStatus.PENDING_VERIFICATION, AccountStatus.REJECTED];
+  if (!eligibleStatuses.includes(user.accountStatus as AccountStatus)) {
     throw new Error("Account not eligible for verification");
   }
 
-  await prisma.user.update({
-    where: { id: input.userId },
-    data: {
-      hasSubmittedVerification: true,
-      medicalLicenseNumber: input.medicalLicenseNumber,
-      idDocumentFrontPath: input.idDocumentFrontPath,
-      idDocumentBackPath: input.idDocumentBackPath,
-    },
-  });
-
-  return {
-    message: "Verification documents submitted successfully. Your account will be reviewed by our team.",
-  };
-}
-
-export async function resubmitVerification(input: SubmitVerificationInput) {
-  const user = await prisma.user.findUnique({
-    where: { id: input.userId },
-  });
-
-  if (!user) {
-    throw new Error("User not found");
-  }
-
-  if (user.accountStatus !== AccountStatus.REJECTED) {
-    throw new Error("Only rejected accounts can resubmit verification");
-  }
-
-  // Update status back to pending and clear previous verification data
   await prisma.user.update({
     where: { id: input.userId },
     data: {
@@ -66,17 +38,20 @@ export async function resubmitVerification(input: SubmitVerificationInput) {
   });
 
   return {
-    message: "Verification documents resubmitted successfully. Your account will be reviewed again by our team.",
+    message: "Verification documents submitted successfully. Your account will be reviewed by our team.",
   };
 }
 
-interface ApproveVerificationInput {
-  userId: string;
-  adminId: string;
-  notes?: string;
+export async function resubmitVerification(input: SubmitVerificationInput) {
+  return submitVerification(input);
 }
 
-export async function approveVerification(input: ApproveVerificationInput) {
+interface VerificationActionInput {
+  userId: string;
+  adminId: string;
+}
+
+export async function approveVerification(input: VerificationActionInput) {
   const user = await prisma.user.findUnique({
     where: { id: input.userId },
   });
@@ -95,11 +70,9 @@ export async function approveVerification(input: ApproveVerificationInput) {
       accountStatus: AccountStatus.ACTIVE,
       verifiedAt: new Date(),
       verifiedBy: input.adminId,
-      verificationNotes: input.notes,
     },
   });
 
-  // Send approval email
   await sendVerificationStatusEmail(user.email, "approved", user.fullName);
 
   return {
@@ -107,13 +80,7 @@ export async function approveVerification(input: ApproveVerificationInput) {
   };
 }
 
-interface RejectVerificationInput {
-  userId: string;
-  adminId: string;
-  notes: string;
-}
-
-export async function rejectVerification(input: RejectVerificationInput) {
+export async function rejectVerification(input: VerificationActionInput) {
   const user = await prisma.user.findUnique({
     where: { id: input.userId },
   });
@@ -132,12 +99,10 @@ export async function rejectVerification(input: RejectVerificationInput) {
       accountStatus: AccountStatus.REJECTED,
       verifiedAt: new Date(),
       verifiedBy: input.adminId,
-      verificationNotes: input.notes,
     },
   });
 
-  // Send rejection email
-  await sendVerificationStatusEmail(user.email, "rejected", user.fullName, input.notes);
+  await sendVerificationStatusEmail(user.email, "rejected", user.fullName);
 
   return {
     message: "User verification rejected",
@@ -148,7 +113,7 @@ export async function getPendingVerifications() {
   const users = await prisma.user.findMany({
     where: {
       accountStatus: AccountStatus.PENDING_VERIFICATION,
-      medicalLicenseNumber: { not: null },
+      hasSubmittedVerification: true,
     },
     select: {
       id: true,
@@ -166,4 +131,57 @@ export async function getPendingVerifications() {
   });
 
   return users;
+}
+
+export async function getMedUsers() {
+  const users = await prisma.user.findMany({
+    where: {
+      role: "MED",
+      hasSubmittedVerification: true,
+    },
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+      phoneNumber: true,
+      medicalLicenseNumber: true,
+      accountStatus: true,
+      createdAt: true,
+    },
+    orderBy: {
+      createdAt: "asc",
+    },
+  });
+
+  return users;
+}
+
+export async function getMedUserById(userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+      phoneNumber: true,
+      medicalLicenseNumber: true,
+      idDocumentFrontPath: true,
+      idDocumentBackPath: true,
+      accountStatus: true,
+      hasSubmittedVerification: true,
+      verificationNotes: true,
+      verifiedAt: true,
+      createdAt: true,
+    },
+  });
+
+  if (!user) {
+    throw new Error("User not found");
+  }
+
+  if (user.accountStatus === "ACTIVE" && !user.hasSubmittedVerification) {
+    throw new Error("User is not a MED user");
+  }
+
+  return user;
 }
