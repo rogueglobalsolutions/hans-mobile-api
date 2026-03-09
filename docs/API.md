@@ -1066,6 +1066,139 @@ Returns the authenticated user's current credit balance, aggregated totals, and 
 
 ---
 
+## Chat (Socket.IO)
+
+The global chat is powered by Socket.IO. All user types (USER, MED, ADMIN) have access. There are no rooms — it's a single shared channel.
+
+**Server URL**: `http://localhost:5656` (same port as the REST API)
+
+### Connection & Authentication
+
+JWT authentication is required. Pass the token in the `auth` option when connecting:
+
+```javascript
+import { io } from "socket.io-client";
+
+const socket = io("http://localhost:5656", {
+  auth: { token: "Bearer YOUR_JWT_TOKEN" }
+});
+```
+
+If the token is missing or invalid, the connection is rejected immediately.
+
+### Events
+
+### POST /api/chat/images
+
+Upload an image to be sent in chat. Returns a relative `imageUrl` to pass as the `imageUrl` field in `send_message`.
+
+**Authentication**: Required (Bearer token)
+
+**Request**: `multipart/form-data`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `image` | file | Yes | Image to send (JPEG, PNG, WebP, max 10MB) |
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Image uploaded successfully",
+  "data": {
+    "imageUrl": "uploads/chat/user-uuid_1234567890.jpg"
+  }
+}
+```
+
+> Construct the full display URL as `http://localhost:5656/<imageUrl>`
+
+---
+
+#### Client → Server
+
+| Event | Payload | Description |
+|---|---|---|
+| `send_message` | `{ message?: string, imageUrl?: string }` | Send a message, image, or both. At least one field required. |
+
+**Constraints:**
+- At least one of `message` or `imageUrl` must be present
+- `message` max 1000 characters
+- `imageUrl` should be the relative path returned by `POST /api/chat/images`
+- Rate limited to 1 message per second per connection
+
+#### Server → Client
+
+| Event | Payload | Description |
+|---|---|---|
+| `chat_history` | `Message[]` | Emitted once on connect — last 50 messages in chronological order |
+| `new_message` | `Message` | Broadcast to all connected clients when any user sends a message |
+| `error` | `{ message: string }` | Emitted back to the sender on validation or rate limit errors |
+
+#### Message Object
+
+```json
+{
+  "id": "msg-uuid",
+  "userId": "user-uuid",
+  "fullName": "Dr. Jane Smith",
+  "profilePicturePath": null,
+  "message": "Hello everyone!",
+  "imageUrl": null,
+  "createdAt": "2026-03-09T12:00:00.000Z"
+}
+```
+
+- `message` and `imageUrl` are both nullable — either or both can be present depending on what was sent
+- Construct full image URLs as `http://localhost:5656/<imageUrl>` and `http://localhost:5656/<profilePicturePath>`
+
+### Example Usage (React Native)
+
+```javascript
+// Connect
+const socket = io("http://localhost:5656", {
+  auth: { token: `Bearer ${userToken}` }
+});
+
+// Load history on connect
+socket.on("chat_history", (messages) => {
+  setMessages(messages);
+});
+
+// Receive new messages in real-time
+socket.on("new_message", (message) => {
+  setMessages((prev) => [...prev, message]);
+});
+
+// Handle errors (validation, rate limit)
+socket.on("error", (err) => {
+  console.error(err.message);
+});
+
+// Send a text message
+socket.emit("send_message", { message: "Hello!" });
+
+// Send an image (upload first, then emit with returned imageUrl)
+const formData = new FormData();
+formData.append("image", { uri, name: "photo.jpg", type: "image/jpeg" });
+const res = await fetch("http://localhost:5656/api/chat/images", {
+  method: "POST",
+  headers: { Authorization: `Bearer ${token}` },
+  body: formData,
+});
+const { data } = await res.json();
+socket.emit("send_message", { imageUrl: data.imageUrl });
+
+// Send both text and image
+socket.emit("send_message", { message: "Check this out!", imageUrl: data.imageUrl });
+
+// Disconnect when leaving the screen
+socket.disconnect();
+```
+
+---
+
 ## Error Codes
 
 | HTTP Status | Meaning |

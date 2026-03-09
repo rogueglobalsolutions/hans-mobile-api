@@ -62,11 +62,13 @@ model User {
   verifiedAt                DateTime?
   verifiedBy                String?
   creditBalance             Int                  @default(0) // Running credit score balance
+  profilePicturePath        String?
   createdAt                 DateTime             @default(now())
   updatedAt                 DateTime             @updatedAt
   otps                      Otp[]
   enrollments               Enrollment[]
   creditTransactions        CreditTransaction[]
+  chatMessages              ChatMessage[]
 }
 
 model Otp {
@@ -122,4 +124,13 @@ model CreditTransaction {
   description String                // Human-readable e.g. "Enrolled in Advanced PDO Thread Techniques"
   referenceId String?               // Optional — trainingId, orderId, etc.
   createdAt   DateTime              @default(now())
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   String?
+  imageUrl  String?
+  createdAt DateTime @default(now())
 }
