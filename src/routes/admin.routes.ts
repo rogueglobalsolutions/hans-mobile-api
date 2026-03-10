@@ -1,6 +1,7 @@
 import { Router } from "express";
 import * as verificationController from "../controllers/verification.controller";
 import * as trainingController from "../controllers/training.controller";
+import * as appointmentController from "../controllers/appointment.controller";
 import { authenticateToken, requireRole } from "../middleware/auth";
 import { Role } from "../generated/prisma/enums";
 import { uploadTrainingBg } from "../middleware/upload";
@@ -30,5 +31,12 @@ router.post(
   uploadTrainingBg.fields([{ name: "backgroundImage", maxCount: 1 }]),
   trainingController.createTraining,
 );
+
+// ─── Appointment management ───────────────────────────────────────────────────
+
+router.get("/appointments", appointmentController.getAppointmentRequests);
+router.post("/appointments/:id/approve", appointmentController.approveAppointment);
+router.post("/appointments/:id/reject", appointmentController.rejectAppointment);
+router.post("/appointments/:id/complete", appointmentController.completeAppointment);
 
 export default router;

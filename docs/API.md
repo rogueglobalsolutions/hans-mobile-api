@@ -1066,6 +1066,255 @@ Returns the authenticated user's current credit balance, aggregated totals, and 
 
 ---
 
+## Appointment Endpoints
+
+MED users can request appointments with the admin. Approved appointments include a static Zoom link sent via email. The calendar date picker blocks dates that already have an approved appointment.
+
+### Appointment Status Lifecycle
+
+```
+PENDING → APPROVED → COMPLETED
+PENDING → REJECTED
+```
+
+| Status | Description |
+|---|---|
+| `PENDING` | Request submitted, awaiting admin review |
+| `APPROVED` | Admin approved; Zoom link emailed to requester |
+| `REJECTED` | Admin rejected; rejection reason emailed to requester |
+| `COMPLETED` | Admin marked the appointment as done |
+
+---
+
+### GET /api/appointments/blocked-dates *(Public)*
+
+Returns a list of dates that already have an approved appointment. Used by the mobile calendar to grey out unavailable dates.
+
+**Authentication**: None required
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Blocked dates retrieved successfully",
+  "data": ["2026-03-18", "2026-03-22"]
+}
+```
+
+> Dates are in `YYYY-MM-DD` format. Dates with `COMPLETED` or `REJECTED` status are **not** included — only `APPROVED`.
+
+---
+
+### POST /api/appointments *(MED only)*
+
+Submit an appointment request.
+
+**Authentication**: Required (Bearer token — MED role)
+
+**Request Body**
+
+```json
+{
+  "date": "2026-03-18",
+  "time": "10:00 AM",
+  "notes": "Interested in discussing PDO thread training options."
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `date` | string | Yes | Date in `YYYY-MM-DD` format. Must be today or in the future. |
+| `time` | string | Yes | Time string, e.g. `"10:00 AM"` |
+| `notes` | string | No | Optional context or reason for the appointment |
+
+**Success Response** (201)
+
+```json
+{
+  "success": true,
+  "message": "Appointment request submitted successfully"
+}
+```
+
+**Error Responses** (400)
+
+```json
+{ "success": false, "message": "Appointment date must be in the future" }
+```
+
+```json
+{ "success": false, "message": "This date is no longer available. Please select another date." }
+```
+
+```json
+{ "success": false, "message": "You already have an appointment request for this date." }
+```
+
+---
+
+### GET /api/appointments/me *(MED only)*
+
+Get all appointments for the authenticated MED user.
+
+**Authentication**: Required (Bearer token — MED role)
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Appointments retrieved successfully",
+  "data": [
+    {
+      "id": "appointment-uuid",
+      "date": "2026-03-18",
+      "time": "10:00 AM",
+      "notes": "Interested in discussing PDO thread training options.",
+      "status": "APPROVED",
+      "zoomLink": "https://zoom.us/j/123456789",
+      "rejectionReason": null,
+      "createdAt": "2026-03-10T08:00:00.000Z"
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `zoomLink` | string \| null | Populated on approval from the server's `ZOOM_MEETING_LINK` env var |
+| `rejectionReason` | string \| null | Populated on rejection — same text sent via email |
+
+---
+
+### GET /api/admin/appointments *(Admin only)*
+
+Get all pending appointment requests. Used to populate the admin's "Requested Appointments" screen.
+
+**Authentication**: Required (Bearer token — ADMIN role)
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Appointment requests retrieved successfully",
+  "data": [
+    {
+      "id": "appointment-uuid",
+      "requesterName": "Dr. Maria Santos",
+      "requesterEmail": "maria.santos@example.com",
+      "date": "2026-03-18",
+      "time": "10:00 AM",
+      "notes": "Interested in discussing PDO thread training options.",
+      "status": "PENDING",
+      "createdAt": "2026-03-10T08:00:00.000Z"
+    }
+  ]
+}
+```
+
+> Only `PENDING` appointments are returned. Sorted oldest-first.
+
+---
+
+### POST /api/admin/appointments/:id/approve *(Admin only)*
+
+Approve a pending appointment. Saves the static Zoom link from `ZOOM_MEETING_LINK` env var to the appointment and sends an email to the requester with the date, time, and Zoom link.
+
+**Authentication**: Required (Bearer token — ADMIN role)
+
+**URL Parameter**: `id` — appointment UUID
+
+**Request Body**: None
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Appointment approved successfully"
+}
+```
+
+**Error Response** (400)
+
+```json
+{ "success": false, "message": "Only pending appointments can be approved" }
+```
+
+> **Environment variable**: `ZOOM_MEETING_LINK` must be set in `.env`. This is a static reusable link for all appointments.
+
+---
+
+### POST /api/admin/appointments/:id/reject *(Admin only)*
+
+Reject a pending appointment. The rejection reason is saved and emailed to the requester.
+
+**Authentication**: Required (Bearer token — ADMIN role)
+
+**URL Parameter**: `id` — appointment UUID
+
+**Request Body**
+
+```json
+{
+  "reason": "The requested date conflicts with an existing schedule. Please choose another date."
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `reason` | string | Yes | Rejection reason — displayed in email to requester |
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Appointment rejected successfully"
+}
+```
+
+**Error Responses** (400)
+
+```json
+{ "success": false, "message": "Rejection reason is required" }
+```
+
+```json
+{ "success": false, "message": "Only pending appointments can be rejected" }
+```
+
+---
+
+### POST /api/admin/appointments/:id/complete *(Admin only)*
+
+Mark an approved appointment as completed after it has taken place.
+
+**Authentication**: Required (Bearer token — ADMIN role)
+
+**URL Parameter**: `id` — appointment UUID
+
+**Request Body**: None
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Appointment marked as completed"
+}
+```
+
+**Error Response** (400)
+
+```json
+{ "success": false, "message": "Only approved appointments can be marked as completed" }
+```
+
+---
+
 ## Chat (Socket.IO)
 
 The global chat is powered by Socket.IO. All user types (USER, MED, ADMIN) have access. There are no rooms — it's a single shared channel.

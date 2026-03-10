@@ -13,6 +13,14 @@ const SAFE_MESSAGES: Record<string, string> = {
   "Only rejected accounts can resubmit verification": "Only rejected accounts can resubmit verification",
   "Insufficient permissions": "Insufficient permissions",
   "User is not a MED user": "User is not a MED user",
+  // Appointment errors
+  "Appointment date must be in the future": "Appointment date must be in the future.",
+  "This date is no longer available. Please select another date.": "This date is no longer available. Please select another date.",
+  "You already have an appointment request for this date.": "You already have an appointment request for this date.",
+  "Appointment not found": "Appointment not found.",
+  "Only pending appointments can be approved": "This appointment can no longer be approved.",
+  "Only pending appointments can be rejected": "This appointment can no longer be rejected.",
+  "Only approved appointments can be marked as completed": "Only approved appointments can be marked as completed.",
 };
 
 const FALLBACK_MESSAGES: Record<string, string> = {
@@ -28,9 +36,18 @@ const FALLBACK_MESSAGES: Record<string, string> = {
   getPendingVerifications: "Failed to retrieve pending verifications.",
   getMedUsers: "Failed to retrieve MED users.",
   getMedUserById: "Failed to retrieve user details.",
+  getVerificationDetail: "Failed to retrieve verification details.",
+  // Appointments
+  createAppointment: "Failed to submit appointment request. Please try again.",
+  getMyAppointments: "Failed to load your appointments.",
+  getBlockedDates: "Failed to load availability. Please try again.",
+  getAppointmentRequests: "Failed to load appointment requests.",
+  approveAppointment: "Failed to approve appointment. Please try again.",
+  rejectAppointment: "Failed to reject appointment. Please try again.",
+  completeAppointment: "Failed to mark appointment as completed. Please try again.",
 };
 
-export function sanitizeError(error: unknown, operation: keyof typeof FALLBACK_MESSAGES): string {
+export function sanitizeError(error: unknown, operation: string): string {
   if (error instanceof Error) {
     // Only return the message if it's in our safe list
     if (SAFE_MESSAGES[error.message]) {
@@ -44,5 +61,5 @@ export function sanitizeError(error: unknown, operation: keyof typeof FALLBACK_M
   }
 
   // Return generic message for anything else
-  return FALLBACK_MESSAGES[operation];
+  return FALLBACK_MESSAGES[operation] ?? "Something went wrong. Please try again.";
 }

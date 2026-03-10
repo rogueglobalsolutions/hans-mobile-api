@@ -42,6 +42,92 @@ export async function sendOtpEmail(to: string, otp: string): Promise<boolean> {
   }
 }
 
+export async function sendAppointmentApprovalEmail(
+  to: string,
+  fullName: string,
+  date: string,
+  time: string,
+  zoomLink: string
+): Promise<boolean> {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+    console.log(`\n========== APPOINTMENT APPROVAL EMAIL ==========`);
+    console.log(`To: ${to}`);
+    console.log(`Name: ${fullName}`);
+    console.log(`Date: ${date} at ${time}`);
+    console.log(`Zoom Link: ${zoomLink}`);
+    console.log(`================================================\n`);
+    return true;
+  }
+
+  try {
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+      to,
+      subject: "Your Appointment Has Been Approved",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto;">
+          <h2 style="color: #15355E;">Appointment Confirmed!</h2>
+          <p>Hi ${fullName},</p>
+          <p>Your appointment request has been approved. Here are your details:</p>
+          <div style="background: #f0f4ff; border-radius: 8px; padding: 16px; margin: 20px 0;">
+            <p style="margin: 0 0 8px;"><strong>Date:</strong> ${date}</p>
+            <p style="margin: 0 0 8px;"><strong>Time:</strong> ${time}</p>
+            <p style="margin: 0;"><strong>Meeting Link:</strong> <a href="${zoomLink}" style="color: #2563eb;">${zoomLink}</a></p>
+          </div>
+          <p>Please join the meeting using the link above at the scheduled time.</p>
+          <p style="color: #666; font-size: 14px; margin-top: 30px;">Thank you!</p>
+        </div>
+      `,
+    });
+    return true;
+  } catch (error) {
+    console.error("Failed to send appointment approval email:", error);
+    return false;
+  }
+}
+
+export async function sendAppointmentRejectionEmail(
+  to: string,
+  fullName: string,
+  date: string,
+  time: string,
+  reason: string
+): Promise<boolean> {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+    console.log(`\n========== APPOINTMENT REJECTION EMAIL ==========`);
+    console.log(`To: ${to}`);
+    console.log(`Name: ${fullName}`);
+    console.log(`Date: ${date} at ${time}`);
+    console.log(`Reason: ${reason}`);
+    console.log(`=================================================\n`);
+    return true;
+  }
+
+  try {
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+      to,
+      subject: "Your Appointment Request Was Not Approved",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto;">
+          <h2 style="color: #E22A44;">Appointment Request Update</h2>
+          <p>Hi ${fullName},</p>
+          <p>Unfortunately, your appointment request for <strong>${date} at ${time}</strong> was not approved.</p>
+          <div style="background: #fff5f5; border-left: 4px solid #E22A44; padding: 12px 16px; margin: 20px 0; border-radius: 4px;">
+            <p style="margin: 0; color: #374151;"><strong>Reason:</strong> ${reason}</p>
+          </div>
+          <p>You are welcome to submit a new request for a different date or time.</p>
+          <p style="color: #666; font-size: 14px; margin-top: 30px;">Thank you for your understanding.</p>
+        </div>
+      `,
+    });
+    return true;
+  } catch (error) {
+    console.error("Failed to send appointment rejection email:", error);
+    return false;
+  }
+}
+
 export async function sendVerificationStatusEmail(
   to: string,
   status: "approved" | "rejected",

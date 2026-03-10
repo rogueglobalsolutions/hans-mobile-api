@@ -46,6 +46,13 @@ enum CreditTransactionType {
   SPENT  // Credit deducted — e.g. store purchase
 }
 
+enum AppointmentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
 model User {
   id                        String               @id @default(uuid())
   fullName                  String
@@ -69,6 +76,7 @@ model User {
   enrollments               Enrollment[]
   creditTransactions        CreditTransaction[]
   chatMessages              ChatMessage[]
+  appointments              Appointment[]
 }
 
 model Otp {
@@ -124,6 +132,20 @@ model CreditTransaction {
   description String                // Human-readable e.g. "Enrolled in Advanced PDO Thread Techniques"
   referenceId String?               // Optional — trainingId, orderId, etc.
   createdAt   DateTime              @default(now())
+}
+
+model Appointment {
+  id              String            @id @default(uuid())
+  medUserId       String
+  medUser         User              @relation(fields: [medUserId], references: [id], onDelete: Cascade)
+  date            String            // "YYYY-MM-DD" e.g. "2026-03-18"
+  time            String            // e.g. "10:00 AM"
+  notes           String?           // Optional context from MED user
+  status          AppointmentStatus @default(PENDING)
+  zoomLink        String?           // Filled on approval from ZOOM_MEETING_LINK env var
+  rejectionReason String?           // Filled on rejection — also sent as email
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 }
 
 model ChatMessage {
