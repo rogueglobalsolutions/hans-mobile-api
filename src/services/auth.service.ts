@@ -238,7 +238,7 @@ export async function updateProfilePicture(userId: string, newFilePath: string) 
     select: { profilePicturePath: true },
   });
 
-  if (existing?.profilePicturePath) {
+  if (existing?.profilePicturePath && existing.profilePicturePath !== newFilePath) {
     const oldPath = path.join(process.cwd(), existing.profilePicturePath);
     if (fs.existsSync(oldPath)) {
       fs.unlinkSync(oldPath);

@@ -77,7 +77,7 @@ const profilePictureStorage = multer.diskStorage({
   filename: (req, file, cb) => {
     const userId = (req as any).userId || "unknown";
     const ext = path.extname(file.originalname);
-    cb(null, `${userId}_profile${ext}`);
+    cb(null, `${userId}_profile_${Date.now()}${ext}`);
   },
 });
 
