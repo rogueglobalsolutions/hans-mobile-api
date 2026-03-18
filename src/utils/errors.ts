@@ -13,6 +13,9 @@ const SAFE_MESSAGES: Record<string, string> = {
   "Only rejected accounts can resubmit verification": "Only rejected accounts can resubmit verification",
   "Insufficient permissions": "Insufficient permissions",
   "User is not a MED user": "User is not a MED user",
+  // Profile update
+  "Full name is required": "Full name is required",
+  "Invalid phone number format": "Invalid phone number format",
   // Appointment errors
   "Appointment date must be in the future": "Appointment date must be in the future.",
   "This date is no longer available. Please select another date.": "This date is no longer available. Please select another date.",
@@ -45,6 +48,8 @@ const FALLBACK_MESSAGES: Record<string, string> = {
   approveAppointment: "Failed to approve appointment. Please try again.",
   rejectAppointment: "Failed to reject appointment. Please try again.",
   completeAppointment: "Failed to mark appointment as completed. Please try again.",
+  updateProfile: "Failed to update profile. Please try again.",
+  updateProfilePicture: "Failed to update profile picture. Please try again.",
 };
 
 export function sanitizeError(error: unknown, operation: string): string {

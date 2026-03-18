@@ -116,6 +116,36 @@ export async function login(req: Request, res: Response) {
   }
 }
 
+export async function updateProfilePicture(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId as string;
+    if (!req.file) {
+      res.status(400).json({ success: false, message: "No image file provided" });
+      return;
+    }
+    const relativePath = `uploads/profile-pictures/${req.file.filename}`;
+    const result = await authService.updateProfilePicture(userId, relativePath);
+    res.json({ success: true, message: "Profile picture updated successfully", data: result });
+  } catch (error) {
+    res.status(400).json({ success: false, message: sanitizeError(error, "updateProfilePicture") });
+  }
+}
+
+export async function updateProfile(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId as string;
+    const { fullName, phoneNumber } = req.body;
+    const errors: string[] = [];
+    if (!fullName || typeof fullName !== "string" || !fullName.trim()) errors.push("Full name is required");
+    if (!phoneNumber || typeof phoneNumber !== "string" || !phoneNumber.trim()) errors.push("Phone number is required");
+    if (errors.length > 0) { res.status(400).json({ success: false, message: "Validation failed", errors }); return; }
+    const updated = await authService.updateProfile(userId, { fullName, phoneNumber });
+    res.json({ success: true, message: "Profile updated successfully", data: updated });
+  } catch (error) {
+    res.status(400).json({ success: false, message: sanitizeError(error, "updateProfile") });
+  }
+}
+
 export async function forgotPassword(req: Request, res: Response) {
   try {
     const { email } = req.body;

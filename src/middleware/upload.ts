@@ -63,6 +63,30 @@ export const uploadTrainingBg = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB — backgrounds can be larger
 });
 
+// ─── Profile pictures ─────────────────────────────────────────────────────────
+
+const profilePicturesDir = path.join(process.cwd(), "uploads", "profile-pictures");
+if (!fs.existsSync(profilePicturesDir)) {
+  fs.mkdirSync(profilePicturesDir, { recursive: true });
+}
+
+const profilePictureStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, profilePicturesDir);
+  },
+  filename: (req, file, cb) => {
+    const userId = (req as any).userId || "unknown";
+    const ext = path.extname(file.originalname);
+    cb(null, `${userId}_profile${ext}`);
+  },
+});
+
+export const uploadProfilePicture = multer({
+  storage: profilePictureStorage,
+  fileFilter: imageFileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+});
+
 // ─── Chat images ──────────────────────────────────────────────────────────────
 
 const chatImagesDir = path.join(process.cwd(), "uploads", "chat");

@@ -251,9 +251,12 @@ Authenticate a user and receive a JWT token.
       "fullName": "John Doe",
       "email": "john@example.com",
       "phoneNumber": "+14155552671",
-      "role": "USER",
+      "role": "MED",
       "accountStatus": "ACTIVE",
-      "hasSubmittedVerification": false
+      "hasSubmittedVerification": true,
+      "medicalLicenseNumber": "LIC-12345",
+      "verifiedAt": "2026-01-15T08:00:00.000Z",
+      "createdAt": "2025-12-01T08:00:00.000Z"
     }
   }
 }
@@ -426,6 +429,106 @@ Set a new password using the reset token from OTP verification.
   "message": "Invalid or expired reset token"
 }
 ```
+
+---
+
+### PATCH /api/auth/profile
+
+Update the authenticated user's full name and phone number.
+
+**Headers**
+
+| Header | Value |
+|--------|-------|
+| Authorization | `Bearer <token>` |
+
+**Request Body**
+
+```json
+{
+  "fullName": "Jane Doe",
+  "phoneNumber": "+639171234567"
+}
+```
+
+**Validation Rules**
+
+| Field | Rules |
+|-------|-------|
+| fullName | Required, non-empty string |
+| phoneNumber | Required, valid E.164 phone number, must be unique |
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Profile updated successfully",
+  "data": {
+    "id": "uuid",
+    "fullName": "Jane Doe",
+    "phoneNumber": "+639171234567"
+  }
+}
+```
+
+**Error Responses** (400)
+
+```json
+{ "success": false, "message": "Invalid phone number format" }
+```
+```json
+{ "success": false, "message": "Phone number already registered" }
+```
+```json
+{ "success": false, "message": "Full name is required" }
+```
+
+---
+
+### PATCH /api/auth/profile/picture
+
+Upload or replace the authenticated user's profile picture.
+
+**Headers**
+
+| Header | Value |
+|--------|-------|
+| Authorization | `Bearer <token>` |
+| Content-Type | `multipart/form-data` |
+
+**Form Fields**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `profilePicture` | file | Yes | Image file (JPEG, PNG, WebP, max 5 MB) |
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Profile picture updated successfully",
+  "data": {
+    "profilePicturePath": "uploads/profile-pictures/user-uuid_profile.jpg"
+  }
+}
+```
+
+> **Profile picture URL**: To display the image, construct the full URL as `http://localhost:5656/<profilePicturePath>`.
+
+**Error Responses** (400)
+
+```json
+{ "success": false, "message": "No image file provided" }
+```
+```json
+{ "success": false, "message": "Invalid file type. Only JPEG, PNG, and WebP images are allowed." }
+```
+
+**Notes**
+- If the user already has a profile picture, the old file is deleted from disk before saving the new one.
+- Files are stored at `uploads/profile-pictures/` named `{userId}_profile.{ext}`.
 
 ---
 
