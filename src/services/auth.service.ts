@@ -108,6 +108,7 @@ export async function login(input: LoginInput) {
       medicalLicenseNumber: user.medicalLicenseNumber ?? undefined,
       verifiedAt: user.verifiedAt ?? undefined,
       createdAt: user.createdAt,
+      profilePicturePath: user.profilePicturePath ?? undefined,
     },
   };
 }
