@@ -10,7 +10,7 @@ function isValidEmail(email: string): boolean {
 
 export async function register(req: Request, res: Response) {
   try {
-    const { fullName, email, phoneNumber, password, confirmPassword, role } = req.body;
+    const { fullName, email, phoneNumber, password, confirmPassword, role, country, city, stateProvince, zipCode, address } = req.body;
 
     const errors: string[] = [];
 
@@ -70,6 +70,11 @@ export async function register(req: Request, res: Response) {
       phoneNumber: phoneValidation.formatted,
       password,
       role: role as Role | undefined,
+      country,
+      city,
+      stateProvince,
+      zipCode,
+      address,
     });
 
     res.status(201).json({
@@ -236,5 +241,40 @@ export async function resetPassword(req: Request, res: Response) {
     });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "resetPassword") });
+  }
+}
+
+export async function changePassword(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId as string;
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+
+    const errors: string[] = [];
+
+    if (!currentPassword || typeof currentPassword !== "string") {
+      errors.push("Current password is required");
+    }
+
+    if (!newPassword || typeof newPassword !== "string" || newPassword.length < 8) {
+      errors.push("New password must be at least 8 characters");
+    }
+
+    if (newPassword !== confirmPassword) {
+      errors.push("Passwords do not match");
+    }
+
+    if (errors.length > 0) {
+      res.status(400).json({ success: false, message: "Validation failed", errors });
+      return;
+    }
+
+    const result = await authService.changePassword(userId, currentPassword, newPassword);
+
+    res.json({
+      success: true,
+      message: result.message,
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: sanitizeError(error, "changePassword") });
   }
 }

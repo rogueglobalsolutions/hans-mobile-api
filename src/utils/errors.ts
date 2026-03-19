@@ -16,6 +16,8 @@ const SAFE_MESSAGES: Record<string, string> = {
   // Profile update
   "Full name is required": "Full name is required",
   "Invalid phone number format": "Invalid phone number format",
+  // Change password
+  "Current password is incorrect": "Current password is incorrect",
   // Appointment errors
   "Appointment date must be in the future": "Appointment date must be in the future.",
   "This date is no longer available. Please select another date.": "This date is no longer available. Please select another date.",
@@ -50,6 +52,7 @@ const FALLBACK_MESSAGES: Record<string, string> = {
   completeAppointment: "Failed to mark appointment as completed. Please try again.",
   updateProfile: "Failed to update profile. Please try again.",
   updateProfilePicture: "Failed to update profile picture. Please try again.",
+  changePassword: "Failed to change password. Please try again.",
 };
 
 export function sanitizeError(error: unknown, operation: string): string {

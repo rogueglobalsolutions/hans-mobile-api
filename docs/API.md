@@ -151,7 +151,12 @@ Create a new user account.
   "phoneNumber": "+14155552671",
   "password": "securepassword123",
   "confirmPassword": "securepassword123",
-  "role": "USER"
+  "role": "USER",
+  "country": "United States",
+  "city": "Los Angeles",
+  "stateProvince": "California",
+  "zipCode": "90001",
+  "address": "123 Main St"
 }
 ```
 
@@ -165,6 +170,11 @@ Create a new user account.
 | password | Required, minimum 8 characters |
 | confirmPassword | Must match password |
 | role | Optional, must be "USER" or "MED" (defaults to "USER"). ADMIN role cannot be registered. |
+| country | Optional, string |
+| city | Optional, string |
+| stateProvince | Optional, string |
+| zipCode | Optional, string |
+| address | Optional, free-text string |
 
 **Phone Number Validation:**
 - Phone numbers are validated using `libphonenumber-js` on both frontend and backend
@@ -529,6 +539,54 @@ Upload or replace the authenticated user's profile picture.
 **Notes**
 - If the user already has a profile picture, the old file is deleted from disk before saving the new one.
 - Files are stored at `uploads/profile-pictures/` named `{userId}_profile.{ext}`.
+
+---
+
+### PATCH /api/auth/change-password
+
+Change the authenticated user's password.
+
+**Headers**
+
+| Header | Value |
+|--------|-------|
+| Authorization | `Bearer <token>` |
+
+**Request Body**
+
+```json
+{
+  "currentPassword": "oldpassword123",
+  "newPassword": "newsecurepassword123",
+  "confirmPassword": "newsecurepassword123"
+}
+```
+
+**Validation Rules**
+
+| Field | Rules |
+|-------|-------|
+| currentPassword | Required |
+| newPassword | Required, minimum 8 characters |
+| confirmPassword | Must match newPassword |
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Password changed successfully"
+}
+```
+
+**Error Responses** (400)
+
+```json
+{ "success": false, "message": "Current password is incorrect" }
+```
+```json
+{ "success": false, "message": "Validation failed", "errors": ["New password must be at least 8 characters"] }
+```
 
 ---
 

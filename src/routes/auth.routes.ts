@@ -12,5 +12,6 @@ router.post("/verify-otp", authController.verifyOtp);
 router.post("/reset-password", authController.resetPassword);
 router.patch("/profile", authenticateToken, authController.updateProfile);
 router.patch("/profile/picture", authenticateToken, uploadProfilePicture.single("profilePicture"), authController.updateProfilePicture);
+router.patch("/change-password", authenticateToken, authController.changePassword);
 
 export default router;
