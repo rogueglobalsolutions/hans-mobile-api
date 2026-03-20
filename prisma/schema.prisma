@@ -46,6 +46,13 @@ enum CreditTransactionType {
   SPENT  // Credit deducted — e.g. store purchase
 }
 
+enum AppointmentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
 model User {
   id                        String               @id @default(uuid())
   fullName                  String
@@ -63,12 +70,21 @@ model User {
   verifiedBy                String?
   creditBalance             Int                  @default(0) // Running credit score balance
   profilePicturePath        String?
+  country                   String?
+  city                      String?
+  stateProvince             String?
+  zipCode                   String?
+  address                   String?
   createdAt                 DateTime             @default(now())
   updatedAt                 DateTime             @updatedAt
   otps                      Otp[]
   enrollments               Enrollment[]
   creditTransactions        CreditTransaction[]
   chatMessages              ChatMessage[]
+  appointments              Appointment[]
+  baEntries                 BeforeAndAfterEntry[]  @relation("UserBAEntries")
+  contestEntries            ContestEntry[]         @relation("UserContestEntries")
+  contestLikes              ContestLike[]          @relation("AdminContestLikes")
 }
 
 model Otp {
@@ -126,6 +142,20 @@ model CreditTransaction {
   createdAt   DateTime              @default(now())
 }
 
+model Appointment {
+  id              String            @id @default(uuid())
+  medUserId       String
+  medUser         User              @relation(fields: [medUserId], references: [id], onDelete: Cascade)
+  date            String            // "YYYY-MM-DD" e.g. "2026-03-18"
+  time            String            // e.g. "10:00 AM"
+  notes           String?           // Optional context from MED user
+  status          AppointmentStatus @default(PENDING)
+  zoomLink        String?           // Filled on approval from ZOOM_MEETING_LINK env var
+  rejectionReason String?           // Filled on rejection — also sent as email
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+}
+
 model ChatMessage {
   id        String   @id @default(uuid())
   userId    String
@@ -133,4 +163,65 @@ model ChatMessage {
   message   String?
   imageUrl  String?
   createdAt DateTime @default(now())
+}
+
+// ─── Before & After ───────────────────────────────────────────────────────────
+
+model BeforeAndAfterEntry {
+  id          String                 @id @default(uuid())
+  userId      String
+  user        User                   @relation("UserBAEntries", fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  description String
+  media       BeforeAndAfterMedia[]
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+}
+
+model BeforeAndAfterMedia {
+  id       String              @id @default(uuid())
+  entryId  String
+  entry    BeforeAndAfterEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  section  MediaSection        // BEFORE or AFTER
+  label    String              // e.g. "Left Side Face", "Center Face", "Right Side Face"
+  filePath String
+}
+
+enum MediaSection {
+  BEFORE
+  AFTER
+}
+
+// ─── B&A Contest ──────────────────────────────────────────────────────────────
+
+model ContestEntry {
+  id          String              @id @default(uuid())
+  userId      String
+  user        User                @relation("UserContestEntries", fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  description String
+  media       ContestEntryMedia[]
+  likes       ContestLike[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+}
+
+model ContestEntryMedia {
+  id       String       @id @default(uuid())
+  entryId  String
+  entry    ContestEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  section  MediaSection // BEFORE or AFTER
+  filePath String
+  fileType String       @default("image") // "image" or "video"
+}
+
+model ContestLike {
+  id        String       @id @default(uuid())
+  entryId   String
+  entry     ContestEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  adminId   String
+  admin     User         @relation("AdminContestLikes", fields: [adminId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+
+  @@unique([entryId, adminId])
 }

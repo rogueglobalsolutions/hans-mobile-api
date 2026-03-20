@@ -151,7 +151,12 @@ Create a new user account.
   "phoneNumber": "+14155552671",
   "password": "securepassword123",
   "confirmPassword": "securepassword123",
-  "role": "USER"
+  "role": "USER",
+  "country": "United States",
+  "city": "Los Angeles",
+  "stateProvince": "California",
+  "zipCode": "90001",
+  "address": "123 Main St"
 }
 ```
 
@@ -165,6 +170,11 @@ Create a new user account.
 | password | Required, minimum 8 characters |
 | confirmPassword | Must match password |
 | role | Optional, must be "USER" or "MED" (defaults to "USER"). ADMIN role cannot be registered. |
+| country | Optional, string |
+| city | Optional, string |
+| stateProvince | Optional, string |
+| zipCode | Optional, string |
+| address | Optional, free-text string |
 
 **Phone Number Validation:**
 - Phone numbers are validated using `libphonenumber-js` on both frontend and backend
@@ -251,9 +261,12 @@ Authenticate a user and receive a JWT token.
       "fullName": "John Doe",
       "email": "john@example.com",
       "phoneNumber": "+14155552671",
-      "role": "USER",
+      "role": "MED",
       "accountStatus": "ACTIVE",
-      "hasSubmittedVerification": false
+      "hasSubmittedVerification": true,
+      "medicalLicenseNumber": "LIC-12345",
+      "verifiedAt": "2026-01-15T08:00:00.000Z",
+      "createdAt": "2025-12-01T08:00:00.000Z"
     }
   }
 }
@@ -425,6 +438,154 @@ Set a new password using the reset token from OTP verification.
   "success": false,
   "message": "Invalid or expired reset token"
 }
+```
+
+---
+
+### PATCH /api/auth/profile
+
+Update the authenticated user's full name and phone number.
+
+**Headers**
+
+| Header | Value |
+|--------|-------|
+| Authorization | `Bearer <token>` |
+
+**Request Body**
+
+```json
+{
+  "fullName": "Jane Doe",
+  "phoneNumber": "+639171234567"
+}
+```
+
+**Validation Rules**
+
+| Field | Rules |
+|-------|-------|
+| fullName | Required, non-empty string |
+| phoneNumber | Required, valid E.164 phone number, must be unique |
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Profile updated successfully",
+  "data": {
+    "id": "uuid",
+    "fullName": "Jane Doe",
+    "phoneNumber": "+639171234567"
+  }
+}
+```
+
+**Error Responses** (400)
+
+```json
+{ "success": false, "message": "Invalid phone number format" }
+```
+```json
+{ "success": false, "message": "Phone number already registered" }
+```
+```json
+{ "success": false, "message": "Full name is required" }
+```
+
+---
+
+### PATCH /api/auth/profile/picture
+
+Upload or replace the authenticated user's profile picture.
+
+**Headers**
+
+| Header | Value |
+|--------|-------|
+| Authorization | `Bearer <token>` |
+| Content-Type | `multipart/form-data` |
+
+**Form Fields**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `profilePicture` | file | Yes | Image file (JPEG, PNG, WebP, max 5 MB) |
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Profile picture updated successfully",
+  "data": {
+    "profilePicturePath": "uploads/profile-pictures/user-uuid_profile.jpg"
+  }
+}
+```
+
+> **Profile picture URL**: To display the image, construct the full URL as `http://localhost:5656/<profilePicturePath>`.
+
+**Error Responses** (400)
+
+```json
+{ "success": false, "message": "No image file provided" }
+```
+```json
+{ "success": false, "message": "Invalid file type. Only JPEG, PNG, and WebP images are allowed." }
+```
+
+**Notes**
+- If the user already has a profile picture, the old file is deleted from disk before saving the new one.
+- Files are stored at `uploads/profile-pictures/` named `{userId}_profile.{ext}`.
+
+---
+
+### PATCH /api/auth/change-password
+
+Change the authenticated user's password.
+
+**Headers**
+
+| Header | Value |
+|--------|-------|
+| Authorization | `Bearer <token>` |
+
+**Request Body**
+
+```json
+{
+  "currentPassword": "oldpassword123",
+  "newPassword": "newsecurepassword123",
+  "confirmPassword": "newsecurepassword123"
+}
+```
+
+**Validation Rules**
+
+| Field | Rules |
+|-------|-------|
+| currentPassword | Required |
+| newPassword | Required, minimum 8 characters |
+| confirmPassword | Must match newPassword |
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Password changed successfully"
+}
+```
+
+**Error Responses** (400)
+
+```json
+{ "success": false, "message": "Current password is incorrect" }
+```
+```json
+{ "success": false, "message": "Validation failed", "errors": ["New password must be at least 8 characters"] }
 ```
 
 ---
@@ -1066,6 +1227,255 @@ Returns the authenticated user's current credit balance, aggregated totals, and 
 
 ---
 
+## Appointment Endpoints
+
+MED users can request appointments with the admin. Approved appointments include a static Zoom link sent via email. The calendar date picker blocks dates that already have an approved appointment.
+
+### Appointment Status Lifecycle
+
+```
+PENDING → APPROVED → COMPLETED
+PENDING → REJECTED
+```
+
+| Status | Description |
+|---|---|
+| `PENDING` | Request submitted, awaiting admin review |
+| `APPROVED` | Admin approved; Zoom link emailed to requester |
+| `REJECTED` | Admin rejected; rejection reason emailed to requester |
+| `COMPLETED` | Admin marked the appointment as done |
+
+---
+
+### GET /api/appointments/blocked-dates *(Public)*
+
+Returns a list of dates that already have an approved appointment. Used by the mobile calendar to grey out unavailable dates.
+
+**Authentication**: None required
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Blocked dates retrieved successfully",
+  "data": ["2026-03-18", "2026-03-22"]
+}
+```
+
+> Dates are in `YYYY-MM-DD` format. Dates with `COMPLETED` or `REJECTED` status are **not** included — only `APPROVED`.
+
+---
+
+### POST /api/appointments *(MED only)*
+
+Submit an appointment request.
+
+**Authentication**: Required (Bearer token — MED role)
+
+**Request Body**
+
+```json
+{
+  "date": "2026-03-18",
+  "time": "10:00 AM",
+  "notes": "Interested in discussing PDO thread training options."
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `date` | string | Yes | Date in `YYYY-MM-DD` format. Must be today or in the future. |
+| `time` | string | Yes | Time string, e.g. `"10:00 AM"` |
+| `notes` | string | No | Optional context or reason for the appointment |
+
+**Success Response** (201)
+
+```json
+{
+  "success": true,
+  "message": "Appointment request submitted successfully"
+}
+```
+
+**Error Responses** (400)
+
+```json
+{ "success": false, "message": "Appointment date must be in the future" }
+```
+
+```json
+{ "success": false, "message": "This date is no longer available. Please select another date." }
+```
+
+```json
+{ "success": false, "message": "You already have an appointment request for this date." }
+```
+
+---
+
+### GET /api/appointments/me *(MED only)*
+
+Get all appointments for the authenticated MED user.
+
+**Authentication**: Required (Bearer token — MED role)
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Appointments retrieved successfully",
+  "data": [
+    {
+      "id": "appointment-uuid",
+      "date": "2026-03-18",
+      "time": "10:00 AM",
+      "notes": "Interested in discussing PDO thread training options.",
+      "status": "APPROVED",
+      "zoomLink": "https://zoom.us/j/123456789",
+      "rejectionReason": null,
+      "createdAt": "2026-03-10T08:00:00.000Z"
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `zoomLink` | string \| null | Populated on approval from the server's `ZOOM_MEETING_LINK` env var |
+| `rejectionReason` | string \| null | Populated on rejection — same text sent via email |
+
+---
+
+### GET /api/admin/appointments *(Admin only)*
+
+Get all pending appointment requests. Used to populate the admin's "Requested Appointments" screen.
+
+**Authentication**: Required (Bearer token — ADMIN role)
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Appointment requests retrieved successfully",
+  "data": [
+    {
+      "id": "appointment-uuid",
+      "requesterName": "Dr. Maria Santos",
+      "requesterEmail": "maria.santos@example.com",
+      "date": "2026-03-18",
+      "time": "10:00 AM",
+      "notes": "Interested in discussing PDO thread training options.",
+      "status": "PENDING",
+      "createdAt": "2026-03-10T08:00:00.000Z"
+    }
+  ]
+}
+```
+
+> Only `PENDING` appointments are returned. Sorted oldest-first.
+
+---
+
+### POST /api/admin/appointments/:id/approve *(Admin only)*
+
+Approve a pending appointment. Saves the static Zoom link from `ZOOM_MEETING_LINK` env var to the appointment and sends an email to the requester with the date, time, and Zoom link.
+
+**Authentication**: Required (Bearer token — ADMIN role)
+
+**URL Parameter**: `id` — appointment UUID
+
+**Request Body**: None
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Appointment approved successfully"
+}
+```
+
+**Error Response** (400)
+
+```json
+{ "success": false, "message": "Only pending appointments can be approved" }
+```
+
+> **Environment variable**: `ZOOM_MEETING_LINK` must be set in `.env`. This is a static reusable link for all appointments.
+
+---
+
+### POST /api/admin/appointments/:id/reject *(Admin only)*
+
+Reject a pending appointment. The rejection reason is saved and emailed to the requester.
+
+**Authentication**: Required (Bearer token — ADMIN role)
+
+**URL Parameter**: `id` — appointment UUID
+
+**Request Body**
+
+```json
+{
+  "reason": "The requested date conflicts with an existing schedule. Please choose another date."
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `reason` | string | Yes | Rejection reason — displayed in email to requester |
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Appointment rejected successfully"
+}
+```
+
+**Error Responses** (400)
+
+```json
+{ "success": false, "message": "Rejection reason is required" }
+```
+
+```json
+{ "success": false, "message": "Only pending appointments can be rejected" }
+```
+
+---
+
+### POST /api/admin/appointments/:id/complete *(Admin only)*
+
+Mark an approved appointment as completed after it has taken place.
+
+**Authentication**: Required (Bearer token — ADMIN role)
+
+**URL Parameter**: `id` — appointment UUID
+
+**Request Body**: None
+
+**Success Response** (200)
+
+```json
+{
+  "success": true,
+  "message": "Appointment marked as completed"
+}
+```
+
+**Error Response** (400)
+
+```json
+{ "success": false, "message": "Only approved appointments can be marked as completed" }
+```
+
+---
+
 ## Chat (Socket.IO)
 
 The global chat is powered by Socket.IO. All user types (USER, MED, ADMIN) have access. There are no rooms — it's a single shared channel.
@@ -1195,6 +1605,257 @@ socket.emit("send_message", { message: "Check this out!", imageUrl: data.imageUr
 
 // Disconnect when leaving the screen
 socket.disconnect();
+```
+
+---
+
+## Before & After (MED User)
+
+All B&A endpoints require authentication and `MED` role.
+
+### Create B&A Entry
+
+`POST /api/ba/entries`
+
+Upload a Before & After entry with photos.
+
+**Content-Type**: `multipart/form-data`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `title` | string | Yes | Entry title |
+| `description` | string | Yes | Entry description |
+| `beforePhotos` | file[] | Yes | Up to 3 "before" photos (JPEG, PNG, WebP, HEIC) |
+| `afterPhotos` | file[] | Yes | Up to 3 "after" photos (JPEG, PNG, WebP, HEIC) |
+
+**Success Response** (201):
+```json
+{
+  "success": true,
+  "message": "Entry created successfully",
+  "data": {
+    "id": "uuid",
+    "userId": "uuid",
+    "title": "Patient A - Acne Treatment",
+    "description": "After 3 months of product use...",
+    "media": [
+      {
+        "id": "uuid",
+        "section": "BEFORE",
+        "label": "Left Side Face",
+        "filePath": "uploads/ba-media/userId_ba_1234_xxxx.jpg"
+      }
+    ],
+    "createdAt": "2026-03-20T..."
+  }
+}
+```
+
+**Notes:**
+- Photos are stored under `uploads/ba-media/`
+- Each photo gets a label based on slot position: "Left Side Face", "Center Face", "Right Side Face"
+- File size limit: 10 MB per photo
+
+### List My B&A Entries
+
+`GET /api/ba/entries`
+
+Returns all B&A entries for the authenticated MED user, ordered by newest first.
+
+### Get My Entry Count
+
+`GET /api/ba/entries/count`
+
+Returns the number of B&A entries for the authenticated user. Used for contest eligibility checks.
+
+**Success Response**:
+```json
+{
+  "success": true,
+  "data": { "count": 7 }
+}
+```
+
+### Get B&A Entry Detail
+
+`GET /api/ba/entries/:id`
+
+Returns a single B&A entry with all media. Only returns entries owned by the authenticated user.
+
+### Delete B&A Entry
+
+`DELETE /api/ba/entries/:id`
+
+Deletes a B&A entry and its media files from disk. Only the owner can delete.
+
+---
+
+## B&A Contest (MED User)
+
+All contest endpoints require authentication and `MED` role.
+
+### Create Contest Entry
+
+`POST /api/ba/contest`
+
+Submit a contest entry with before/after media (images and videos).
+
+**Content-Type**: `multipart/form-data`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `title` | string | Yes | Entry title (max 80 chars) |
+| `description` | string | Yes | Entry description (max 500 chars) |
+| `beforeMedia` | file[] | Yes | Up to 10 "before" images/videos |
+| `afterMedia` | file[] | Yes | Up to 10 "after" images/videos |
+
+**Eligibility**: User must have at least **5 B&A entries** before submitting to the contest. If not eligible, returns 400 with message: `"You need at least 5 Before & After entries before submitting to the contest. You currently have X."`
+
+**Accepted file types**: JPEG, PNG, WebP, HEIC (images), MP4, MOV, AVI (videos)
+
+**File size limit**: 50 MB per file
+
+**Success Response** (201):
+```json
+{
+  "success": true,
+  "message": "Contest entry submitted successfully",
+  "data": {
+    "id": "uuid",
+    "title": "Patient A - MINT PDO Thread Lift",
+    "description": "Remarkable facial rejuvenation...",
+    "media": [
+      {
+        "id": "uuid",
+        "section": "BEFORE",
+        "filePath": "uploads/contest-media/userId_contest_1234_xxxx.jpg",
+        "fileType": "image"
+      }
+    ],
+    "_count": { "likes": 0 },
+    "createdAt": "2026-03-20T..."
+  }
+}
+```
+
+### List My Contest Entries
+
+`GET /api/ba/contest`
+
+Returns all contest entries for the authenticated MED user.
+
+### Get Contest Entry Detail
+
+`GET /api/ba/contest/:id`
+
+Returns a single contest entry with media and like count.
+
+### Delete Contest Entry
+
+`DELETE /api/ba/contest/:id`
+
+Deletes a contest entry and its media files from disk.
+
+---
+
+## Admin: Before & After Management
+
+All admin B&A endpoints require authentication and `ADMIN` role.
+
+### Get All B&A Entries
+
+`GET /api/admin/ba/entries`
+
+Returns all B&A entries from all MED users, including submitter info. View only — admins cannot react to these.
+
+**Success Response**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "title": "Patient A - Acne Treatment",
+      "description": "...",
+      "media": [...],
+      "user": {
+        "id": "uuid",
+        "fullName": "Dr. Maria Santos",
+        "email": "maria@example.com",
+        "profilePicturePath": null
+      },
+      "createdAt": "2026-03-20T..."
+    }
+  ]
+}
+```
+
+### Get B&A Entry Detail (Admin)
+
+`GET /api/admin/ba/entries/:id`
+
+Returns a single B&A entry with submitter info and all media.
+
+### Get All Contest Entries (Admin)
+
+`GET /api/admin/ba/contest`
+
+Returns all contest entries with submitter info, like counts, and whether the current admin has liked each entry.
+
+**Success Response**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "title": "Patient A - MINT PDO Thread Lift",
+      "description": "...",
+      "media": [...],
+      "user": { "id": "uuid", "fullName": "Dr. Maria Santos", ... },
+      "heartCount": 3,
+      "hearted": true,
+      "createdAt": "2026-03-20T..."
+    }
+  ]
+}
+```
+
+### Get Contest Entry Detail (Admin)
+
+`GET /api/admin/ba/contest/:id`
+
+Returns a single contest entry with submitter info and like state.
+
+### Toggle Contest Like
+
+`POST /api/admin/ba/contest/:id/like`
+
+Toggles the admin's like on a contest entry. If already liked, removes the like.
+
+**Success Response**:
+```json
+{
+  "success": true,
+  "data": { "liked": true }
+}
+```
+
+### Get B&A Dashboard Stats
+
+`GET /api/admin/ba/stats`
+
+Returns aggregate counts for the admin dashboard.
+
+**Success Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "baCount": 12,
+    "contestCount": 4
+  }
+}
 ```
 
 ---

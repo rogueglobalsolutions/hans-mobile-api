@@ -1,9 +1,12 @@
 import bcrypt from "bcryptjs";
+import fs from "fs";
+import path from "path";
 import prisma from "../config/prisma";
 import { Role, AccountStatus } from "../generated/prisma/enums";
 import { signToken, signResetToken, verifyToken, ResetTokenPayload } from "../utils/jwt";
 import { generateOtp, getOtpExpiry } from "../utils/otp";
 import { sendOtpEmail } from "./email.service";
+import { validateAndFormatPhone } from "../utils/phone";
 
 interface RegisterInput {
   fullName: string;
@@ -11,6 +14,11 @@ interface RegisterInput {
   phoneNumber: string;
   password: string;
   role?: Role;
+  country?: string;
+  city?: string;
+  stateProvince?: string;
+  zipCode?: string;
+  address?: string;
 }
 
 interface LoginInput {
@@ -55,6 +63,11 @@ export async function register(input: RegisterInput) {
       password: hashedPassword,
       role: userRole,
       accountStatus,
+      country: input.country?.trim() || null,
+      city: input.city?.trim() || null,
+      stateProvince: input.stateProvince?.trim() || null,
+      zipCode: input.zipCode?.trim() || null,
+      address: input.address?.trim() || null,
     },
   });
 
@@ -102,7 +115,43 @@ export async function login(input: LoginInput) {
       role: user.role,
       accountStatus: user.accountStatus,
       hasSubmittedVerification: user.hasSubmittedVerification,
+      medicalLicenseNumber: user.medicalLicenseNumber ?? undefined,
+      verifiedAt: user.verifiedAt ?? undefined,
+      createdAt: user.createdAt,
+      profilePicturePath: user.profilePicturePath ?? undefined,
     },
+  };
+}
+
+export async function updateProfile(userId: string, input: { fullName: string; phoneNumber: string }) {
+  const { fullName, phoneNumber } = input;
+
+  if (!fullName || !fullName.trim()) {
+    throw new Error("Full name is required");
+  }
+
+  const phoneValidation = validateAndFormatPhone(phoneNumber.trim());
+  if (!phoneValidation.isValid || !phoneValidation.formatted) {
+    throw new Error("Invalid phone number format");
+  }
+
+  // Check phone isn't already taken by another user
+  const existingPhone = await prisma.user.findFirst({
+    where: { phoneNumber: phoneValidation.formatted, NOT: { id: userId } },
+  });
+  if (existingPhone) {
+    throw new Error("Phone number already registered");
+  }
+
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data: { fullName: fullName.trim(), phoneNumber: phoneValidation.formatted },
+  });
+
+  return {
+    id: user.id,
+    fullName: user.fullName,
+    phoneNumber: user.phoneNumber,
   };
 }
 
@@ -191,4 +240,51 @@ export async function resetPassword(resetToken: string, newPassword: string) {
   });
 
   return { message: "Password reset successfully" };
+}
+
+export async function updateProfilePicture(userId: string, newFilePath: string) {
+  // Delete old profile picture file if one exists
+  const existing = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { profilePicturePath: true },
+  });
+
+  if (existing?.profilePicturePath && existing.profilePicturePath !== newFilePath) {
+    const oldPath = path.join(process.cwd(), existing.profilePicturePath);
+    if (fs.existsSync(oldPath)) {
+      fs.unlinkSync(oldPath);
+    }
+  }
+
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data: { profilePicturePath: newFilePath },
+  });
+
+  return { profilePicturePath: user.profilePicturePath };
+}
+
+export async function changePassword(userId: string, currentPassword: string, newPassword: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { password: true },
+  });
+
+  if (!user) {
+    throw new Error("User not found");
+  }
+
+  const isValid = await bcrypt.compare(currentPassword, user.password);
+  if (!isValid) {
+    throw new Error("Current password is incorrect");
+  }
+
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { password: hashedPassword },
+  });
+
+  return { message: "Password changed successfully" };
 }

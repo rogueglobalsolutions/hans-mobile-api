@@ -10,7 +10,7 @@ function isValidEmail(email: string): boolean {
 
 export async function register(req: Request, res: Response) {
   try {
-    const { fullName, email, phoneNumber, password, confirmPassword, role } = req.body;
+    const { fullName, email, phoneNumber, password, confirmPassword, role, country, city, stateProvince, zipCode, address } = req.body;
 
     const errors: string[] = [];
 
@@ -70,6 +70,11 @@ export async function register(req: Request, res: Response) {
       phoneNumber: phoneValidation.formatted,
       password,
       role: role as Role | undefined,
+      country,
+      city,
+      stateProvince,
+      zipCode,
+      address,
     });
 
     res.status(201).json({
@@ -113,6 +118,36 @@ export async function login(req: Request, res: Response) {
     });
   } catch (error) {
     res.status(401).json({ success: false, message: sanitizeError(error, "login") });
+  }
+}
+
+export async function updateProfilePicture(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId as string;
+    if (!req.file) {
+      res.status(400).json({ success: false, message: "No image file provided" });
+      return;
+    }
+    const relativePath = `uploads/profile-pictures/${req.file.filename}`;
+    const result = await authService.updateProfilePicture(userId, relativePath);
+    res.json({ success: true, message: "Profile picture updated successfully", data: result });
+  } catch (error) {
+    res.status(400).json({ success: false, message: sanitizeError(error, "updateProfilePicture") });
+  }
+}
+
+export async function updateProfile(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId as string;
+    const { fullName, phoneNumber } = req.body;
+    const errors: string[] = [];
+    if (!fullName || typeof fullName !== "string" || !fullName.trim()) errors.push("Full name is required");
+    if (!phoneNumber || typeof phoneNumber !== "string" || !phoneNumber.trim()) errors.push("Phone number is required");
+    if (errors.length > 0) { res.status(400).json({ success: false, message: "Validation failed", errors }); return; }
+    const updated = await authService.updateProfile(userId, { fullName, phoneNumber });
+    res.json({ success: true, message: "Profile updated successfully", data: updated });
+  } catch (error) {
+    res.status(400).json({ success: false, message: sanitizeError(error, "updateProfile") });
   }
 }
 
@@ -206,5 +241,40 @@ export async function resetPassword(req: Request, res: Response) {
     });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "resetPassword") });
+  }
+}
+
+export async function changePassword(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId as string;
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+
+    const errors: string[] = [];
+
+    if (!currentPassword || typeof currentPassword !== "string") {
+      errors.push("Current password is required");
+    }
+
+    if (!newPassword || typeof newPassword !== "string" || newPassword.length < 8) {
+      errors.push("New password must be at least 8 characters");
+    }
+
+    if (newPassword !== confirmPassword) {
+      errors.push("Passwords do not match");
+    }
+
+    if (errors.length > 0) {
+      res.status(400).json({ success: false, message: "Validation failed", errors });
+      return;
+    }
+
+    const result = await authService.changePassword(userId, currentPassword, newPassword);
+
+    res.json({
+      success: true,
+      message: result.message,
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: sanitizeError(error, "changePassword") });
   }
 }
