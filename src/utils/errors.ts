@@ -26,6 +26,11 @@ const SAFE_MESSAGES: Record<string, string> = {
   "Only pending appointments can be approved": "This appointment can no longer be approved.",
   "Only pending appointments can be rejected": "This appointment can no longer be rejected.",
   "Only approved appointments can be marked as completed": "Only approved appointments can be marked as completed.",
+  // B&A
+  "Entry not found": "Entry not found.",
+  "Contest entry not found": "Contest entry not found.",
+  "Title is required": "Title is required.",
+  "Description is required": "Description is required.",
 };
 
 const FALLBACK_MESSAGES: Record<string, string> = {
@@ -53,6 +58,22 @@ const FALLBACK_MESSAGES: Record<string, string> = {
   updateProfile: "Failed to update profile. Please try again.",
   updateProfilePicture: "Failed to update profile picture. Please try again.",
   changePassword: "Failed to change password. Please try again.",
+  // B&A
+  createBAEntry: "Failed to create entry. Please try again.",
+  getMyBAEntries: "Failed to load entries.",
+  getMyBAEntryById: "Failed to load entry details.",
+  deleteBAEntry: "Failed to delete entry. Please try again.",
+  getBAEntryCount: "Failed to load entry count.",
+  createContestEntry: "Failed to submit contest entry. Please try again.",
+  getMyContestEntries: "Failed to load contest entries.",
+  getMyContestEntryById: "Failed to load contest entry details.",
+  deleteContestEntry: "Failed to delete contest entry. Please try again.",
+  getAllBAEntries: "Failed to load B&A entries.",
+  getBAEntryByIdAdmin: "Failed to load entry details.",
+  getAllContestEntries: "Failed to load contest entries.",
+  getContestEntryByIdAdmin: "Failed to load contest entry details.",
+  toggleContestLike: "Failed to update like. Please try again.",
+  getBAStats: "Failed to load B&A statistics.",
 };
 
 export function sanitizeError(error: unknown, operation: string): string {
@@ -60,6 +81,11 @@ export function sanitizeError(error: unknown, operation: string): string {
     // Only return the message if it's in our safe list
     if (SAFE_MESSAGES[error.message]) {
       return SAFE_MESSAGES[error.message];
+    }
+
+    // Pass through contest eligibility messages (dynamic text)
+    if (error.message.startsWith("You need at least")) {
+      return error.message;
     }
 
     // Log the actual error for debugging (internal only)

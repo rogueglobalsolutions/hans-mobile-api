@@ -82,6 +82,9 @@ model User {
   creditTransactions        CreditTransaction[]
   chatMessages              ChatMessage[]
   appointments              Appointment[]
+  baEntries                 BeforeAndAfterEntry[]  @relation("UserBAEntries")
+  contestEntries            ContestEntry[]         @relation("UserContestEntries")
+  contestLikes              ContestLike[]          @relation("AdminContestLikes")
 }
 
 model Otp {
@@ -160,4 +163,65 @@ model ChatMessage {
   message   String?
   imageUrl  String?
   createdAt DateTime @default(now())
+}
+
+// ─── Before & After ───────────────────────────────────────────────────────────
+
+model BeforeAndAfterEntry {
+  id          String                 @id @default(uuid())
+  userId      String
+  user        User                   @relation("UserBAEntries", fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  description String
+  media       BeforeAndAfterMedia[]
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+}
+
+model BeforeAndAfterMedia {
+  id       String              @id @default(uuid())
+  entryId  String
+  entry    BeforeAndAfterEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  section  MediaSection        // BEFORE or AFTER
+  label    String              // e.g. "Left Side Face", "Center Face", "Right Side Face"
+  filePath String
+}
+
+enum MediaSection {
+  BEFORE
+  AFTER
+}
+
+// ─── B&A Contest ──────────────────────────────────────────────────────────────
+
+model ContestEntry {
+  id          String              @id @default(uuid())
+  userId      String
+  user        User                @relation("UserContestEntries", fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  description String
+  media       ContestEntryMedia[]
+  likes       ContestLike[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+}
+
+model ContestEntryMedia {
+  id       String       @id @default(uuid())
+  entryId  String
+  entry    ContestEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  section  MediaSection // BEFORE or AFTER
+  filePath String
+  fileType String       @default("image") // "image" or "video"
+}
+
+model ContestLike {
+  id        String       @id @default(uuid())
+  entryId   String
+  entry     ContestEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  adminId   String
+  admin     User         @relation("AdminContestLikes", fields: [adminId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+
+  @@unique([entryId, adminId])
 }

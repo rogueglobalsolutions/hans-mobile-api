@@ -1609,6 +1609,257 @@ socket.disconnect();
 
 ---
 
+## Before & After (MED User)
+
+All B&A endpoints require authentication and `MED` role.
+
+### Create B&A Entry
+
+`POST /api/ba/entries`
+
+Upload a Before & After entry with photos.
+
+**Content-Type**: `multipart/form-data`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `title` | string | Yes | Entry title |
+| `description` | string | Yes | Entry description |
+| `beforePhotos` | file[] | Yes | Up to 3 "before" photos (JPEG, PNG, WebP, HEIC) |
+| `afterPhotos` | file[] | Yes | Up to 3 "after" photos (JPEG, PNG, WebP, HEIC) |
+
+**Success Response** (201):
+```json
+{
+  "success": true,
+  "message": "Entry created successfully",
+  "data": {
+    "id": "uuid",
+    "userId": "uuid",
+    "title": "Patient A - Acne Treatment",
+    "description": "After 3 months of product use...",
+    "media": [
+      {
+        "id": "uuid",
+        "section": "BEFORE",
+        "label": "Left Side Face",
+        "filePath": "uploads/ba-media/userId_ba_1234_xxxx.jpg"
+      }
+    ],
+    "createdAt": "2026-03-20T..."
+  }
+}
+```
+
+**Notes:**
+- Photos are stored under `uploads/ba-media/`
+- Each photo gets a label based on slot position: "Left Side Face", "Center Face", "Right Side Face"
+- File size limit: 10 MB per photo
+
+### List My B&A Entries
+
+`GET /api/ba/entries`
+
+Returns all B&A entries for the authenticated MED user, ordered by newest first.
+
+### Get My Entry Count
+
+`GET /api/ba/entries/count`
+
+Returns the number of B&A entries for the authenticated user. Used for contest eligibility checks.
+
+**Success Response**:
+```json
+{
+  "success": true,
+  "data": { "count": 7 }
+}
+```
+
+### Get B&A Entry Detail
+
+`GET /api/ba/entries/:id`
+
+Returns a single B&A entry with all media. Only returns entries owned by the authenticated user.
+
+### Delete B&A Entry
+
+`DELETE /api/ba/entries/:id`
+
+Deletes a B&A entry and its media files from disk. Only the owner can delete.
+
+---
+
+## B&A Contest (MED User)
+
+All contest endpoints require authentication and `MED` role.
+
+### Create Contest Entry
+
+`POST /api/ba/contest`
+
+Submit a contest entry with before/after media (images and videos).
+
+**Content-Type**: `multipart/form-data`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `title` | string | Yes | Entry title (max 80 chars) |
+| `description` | string | Yes | Entry description (max 500 chars) |
+| `beforeMedia` | file[] | Yes | Up to 10 "before" images/videos |
+| `afterMedia` | file[] | Yes | Up to 10 "after" images/videos |
+
+**Eligibility**: User must have at least **5 B&A entries** before submitting to the contest. If not eligible, returns 400 with message: `"You need at least 5 Before & After entries before submitting to the contest. You currently have X."`
+
+**Accepted file types**: JPEG, PNG, WebP, HEIC (images), MP4, MOV, AVI (videos)
+
+**File size limit**: 50 MB per file
+
+**Success Response** (201):
+```json
+{
+  "success": true,
+  "message": "Contest entry submitted successfully",
+  "data": {
+    "id": "uuid",
+    "title": "Patient A - MINT PDO Thread Lift",
+    "description": "Remarkable facial rejuvenation...",
+    "media": [
+      {
+        "id": "uuid",
+        "section": "BEFORE",
+        "filePath": "uploads/contest-media/userId_contest_1234_xxxx.jpg",
+        "fileType": "image"
+      }
+    ],
+    "_count": { "likes": 0 },
+    "createdAt": "2026-03-20T..."
+  }
+}
+```
+
+### List My Contest Entries
+
+`GET /api/ba/contest`
+
+Returns all contest entries for the authenticated MED user.
+
+### Get Contest Entry Detail
+
+`GET /api/ba/contest/:id`
+
+Returns a single contest entry with media and like count.
+
+### Delete Contest Entry
+
+`DELETE /api/ba/contest/:id`
+
+Deletes a contest entry and its media files from disk.
+
+---
+
+## Admin: Before & After Management
+
+All admin B&A endpoints require authentication and `ADMIN` role.
+
+### Get All B&A Entries
+
+`GET /api/admin/ba/entries`
+
+Returns all B&A entries from all MED users, including submitter info. View only — admins cannot react to these.
+
+**Success Response**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "title": "Patient A - Acne Treatment",
+      "description": "...",
+      "media": [...],
+      "user": {
+        "id": "uuid",
+        "fullName": "Dr. Maria Santos",
+        "email": "maria@example.com",
+        "profilePicturePath": null
+      },
+      "createdAt": "2026-03-20T..."
+    }
+  ]
+}
+```
+
+### Get B&A Entry Detail (Admin)
+
+`GET /api/admin/ba/entries/:id`
+
+Returns a single B&A entry with submitter info and all media.
+
+### Get All Contest Entries (Admin)
+
+`GET /api/admin/ba/contest`
+
+Returns all contest entries with submitter info, like counts, and whether the current admin has liked each entry.
+
+**Success Response**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "title": "Patient A - MINT PDO Thread Lift",
+      "description": "...",
+      "media": [...],
+      "user": { "id": "uuid", "fullName": "Dr. Maria Santos", ... },
+      "heartCount": 3,
+      "hearted": true,
+      "createdAt": "2026-03-20T..."
+    }
+  ]
+}
+```
+
+### Get Contest Entry Detail (Admin)
+
+`GET /api/admin/ba/contest/:id`
+
+Returns a single contest entry with submitter info and like state.
+
+### Toggle Contest Like
+
+`POST /api/admin/ba/contest/:id/like`
+
+Toggles the admin's like on a contest entry. If already liked, removes the like.
+
+**Success Response**:
+```json
+{
+  "success": true,
+  "data": { "liked": true }
+}
+```
+
+### Get B&A Dashboard Stats
+
+`GET /api/admin/ba/stats`
+
+Returns aggregate counts for the admin dashboard.
+
+**Success Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "baCount": 12,
+    "contestCount": 4
+  }
+}
+```
+
+---
+
 ## Error Codes
 
 | HTTP Status | Meaning |

@@ -2,6 +2,7 @@ import { Router } from "express";
 import * as verificationController from "../controllers/verification.controller";
 import * as trainingController from "../controllers/training.controller";
 import * as appointmentController from "../controllers/appointment.controller";
+import * as baController from "../controllers/ba.controller";
 import { authenticateToken, requireRole } from "../middleware/auth";
 import { Role } from "../generated/prisma/enums";
 import { uploadTrainingBg } from "../middleware/upload";
@@ -38,5 +39,19 @@ router.get("/appointments", appointmentController.getAppointmentRequests);
 router.post("/appointments/:id/approve", appointmentController.approveAppointment);
 router.post("/appointments/:id/reject", appointmentController.rejectAppointment);
 router.post("/appointments/:id/complete", appointmentController.completeAppointment);
+
+// ─── Before & After management ───────────────────────────────────────────────
+
+// B&A entries (view only for admin)
+router.get("/ba/entries", baController.getAllEntries);
+router.get("/ba/entries/:id", baController.getEntryByIdAdmin);
+
+// Contest entries (view + like)
+router.get("/ba/contest", baController.getAllContestEntries);
+router.get("/ba/contest/:id", baController.getContestEntryByIdAdmin);
+router.post("/ba/contest/:id/like", baController.toggleContestLike);
+
+// Dashboard stats
+router.get("/ba/stats", baController.getBAStats);
 
 export default router;

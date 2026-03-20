@@ -10,6 +10,7 @@ import trainingRoutes from "./routes/training.routes";
 import creditRoutes from "./routes/credit.routes";
 import chatRoutes from "./routes/chat.routes";
 import appointmentRoutes from "./routes/appointment.routes";
+import baRoutes from "./routes/ba.routes";
 import { initSocket } from "./socket";
 
 dotenv.config();
@@ -38,6 +39,7 @@ app.use("/api/trainings", trainingRoutes);
 app.use("/api/credits", creditRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/appointments", appointmentRoutes);
+app.use("/api/ba", baRoutes);
 
 // Global error handler
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
