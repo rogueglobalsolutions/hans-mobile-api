@@ -55,6 +55,9 @@ export const TRAINING_LEVEL_FROM_LABEL: Record<string, TrainingLevel> = {
   "Advanced":                 TrainingLevel.ADVANCED,
   "Package Bundle 1":         TrainingLevel.PACKAGE_BUNDLE_1,
   "Package Bundle 2":         TrainingLevel.PACKAGE_BUNDLE_2,
+  // Merged UI sub-options (Mint Lift Group Training dropdown)
+  "Mint Lift Group Training – Mint Lift Group Training $3000 with $1500 product credits": TrainingLevel.MINT_LIFT_GROUP_TRAINING,
+  "Mint Lift Group Training – Mint Lift Group Training $1500 without product credits":    TrainingLevel.SUPPLEMENTAL,
 };
 
 // ─── LearningFormat (JSON array values) ──────────────────────────────────────
