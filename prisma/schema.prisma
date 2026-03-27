@@ -11,6 +11,7 @@ enum Role {
   USER
   MED
   ADMIN
+  SALES_REP
 }
 
 enum AccountStatus {
@@ -39,6 +40,24 @@ enum TrainingLevel {
   ADVANCED
   PACKAGE_BUNDLE_1
   PACKAGE_BUNDLE_2
+}
+
+enum TrainingStatus {
+  ACTIVE
+  CANCELLED
+  COMPLETED
+}
+
+enum EnrollmentType {
+  ENROLLEE
+  OBSERVER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  REFUNDED
+  FAILED
 }
 
 enum CreditTransactionType {
@@ -79,6 +98,7 @@ model User {
   updatedAt                 DateTime             @updatedAt
   otps                      Otp[]
   enrollments               Enrollment[]
+  salesRepEnrollments       Enrollment[]         @relation("SalesRepEnrollments")
   creditTransactions        CreditTransaction[]
   chatMessages              ChatMessage[]
   appointments              Appointment[]
@@ -98,11 +118,11 @@ model Otp {
 }
 
 model Training {
-  id                  String        @id @default(uuid())
+  id                  String          @id @default(uuid())
   type                TrainingType
   brand               TrainingBrand
   level               TrainingLevel
-  learningFormats     Json          // String[] — validated values: "DEMO" | "DIDACTIC" | "DISCUSSION"
+  learningFormats     Json            // String[] — validated values: "DEMO" | "DIDACTIC" | "DISCUSSION"
   title               String
   speaker             String
   speakerIntro        String
@@ -110,23 +130,39 @@ model Training {
   areasCovered        String
   description         String
   backgroundImagePath String?
-  location            String?       // e.g. "Morristown, NJ"
-  scheduledAt         DateTime?     // When the training is scheduled
-  price               Int           // USD — auto-populated from level at creation
-  creditScore         Int           // In-house currency earned on enrollment — auto-populated from level
-  createdBy           String        // admin userId
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
+  location            String?         // e.g. "Morristown, NJ"
+  scheduledAt         DateTime?       // When the training is scheduled
+  price               Int             // USD — auto-populated from level at creation
+  creditScore         Int             // In-house currency earned on enrollment — auto-populated from level
+  status              TrainingStatus  @default(ACTIVE)
+  maxEnrollees        Int             @default(4)
+  maxObservers        Int             @default(2)
+  observerPrice       Int             @default(500) // USD
+  cancelledAt         DateTime?
+  cancelledBy         String?         // admin userId
+  createdBy           String          // admin userId
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
   enrollments         Enrollment[]
+  folders             TrainingFolder[]
 }
 
 model Enrollment {
-  id         String   @id @default(uuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  trainingId String
-  training   Training @relation(fields: [trainingId], references: [id], onDelete: Cascade)
-  enrolledAt DateTime @default(now())
+  id                    String         @id @default(uuid())
+  userId                String
+  user                  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trainingId            String
+  training              Training       @relation(fields: [trainingId], references: [id], onDelete: Cascade)
+  type                  EnrollmentType @default(ENROLLEE)
+  salesRepId            String?
+  salesRep              User?          @relation("SalesRepEnrollments", fields: [salesRepId], references: [id], onDelete: SetNull)
+  paymentStatus         PaymentStatus  @default(PENDING)
+  stripePaymentIntentId String?
+  stripeRefundId        String?
+  paidAmount            Int?           // USD dollars
+  paidAt                DateTime?
+  refundedAt            DateTime?
+  enrolledAt            DateTime       @default(now())
 
   @@unique([userId, trainingId])
 }
@@ -163,6 +199,31 @@ model ChatMessage {
   message   String?
   imageUrl  String?
   createdAt DateTime @default(now())
+}
+
+// ─── Training Documents ────────────────────────────────────────────────────────
+
+model TrainingFolder {
+  id         String             @id @default(uuid())
+  trainingId String
+  training   Training           @relation(fields: [trainingId], references: [id], onDelete: Cascade)
+  name       String
+  parentId   String?
+  parent     TrainingFolder?    @relation("FolderChildren", fields: [parentId], references: [id])
+  children   TrainingFolder[]   @relation("FolderChildren")
+  files      TrainingDocument[]
+  createdAt  DateTime           @default(now())
+}
+
+model TrainingDocument {
+  id        String         @id @default(uuid())
+  folderId  String
+  folder    TrainingFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  fileName  String
+  filePath  String
+  fileSize  Int
+  mimeType  String
+  createdAt DateTime       @default(now())
 }
 
 // ─── Before & After ───────────────────────────────────────────────────────────

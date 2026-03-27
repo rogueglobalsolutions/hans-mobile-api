@@ -128,6 +128,48 @@ export async function sendAppointmentRejectionEmail(
   }
 }
 
+export async function sendTrainingCancellationEmail(
+  to: string,
+  fullName: string,
+  trainingTitle: string,
+  refundAmountUsd: number,
+): Promise<boolean> {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+    console.log(`\n========== TRAINING CANCELLATION EMAIL ==========`);
+    console.log(`To: ${to}`);
+    console.log(`Name: ${fullName}`);
+    console.log(`Training: ${trainingTitle}`);
+    console.log(`Refund: $${refundAmountUsd}`);
+    console.log(`=================================================\n`);
+    return true;
+  }
+
+  try {
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+      to,
+      subject: "Training Cancelled — Refund Issued",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto;">
+          <h2 style="color: #E22A44;">Training Cancelled</h2>
+          <p>Hi ${fullName},</p>
+          <p>We regret to inform you that the following training has been cancelled:</p>
+          <div style="background: #fff5f5; border-left: 4px solid #E22A44; padding: 12px 16px; margin: 20px 0; border-radius: 4px;">
+            <p style="margin: 0; color: #374151;"><strong>${trainingTitle}</strong></p>
+          </div>
+          <p>A full refund of <strong>$${refundAmountUsd.toFixed(2)} USD</strong> has been issued to your original payment method. Please allow 5–10 business days for the funds to appear.</p>
+          <p>We apologize for any inconvenience. Please feel free to browse other available training programs.</p>
+          <p style="color: #666; font-size: 14px; margin-top: 30px;">Thank you for your understanding.</p>
+        </div>
+      `,
+    });
+    return true;
+  } catch (error) {
+    console.error("Failed to send training cancellation email:", error);
+    return false;
+  }
+}
+
 export async function sendVerificationStatusEmail(
   to: string,
   status: "approved" | "rejected",

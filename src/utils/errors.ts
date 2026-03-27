@@ -31,6 +31,23 @@ const SAFE_MESSAGES: Record<string, string> = {
   "Contest entry not found": "Contest entry not found.",
   "Title is required": "Title is required.",
   "Description is required": "Description is required.",
+  // Training enrollment & payment
+  "Training not found": "Training not found.",
+  "Training is not available for enrollment": "This training is not available for enrollment.",
+  "Training is full": "This training is full. No more slots available.",
+  "Already enrolled in this training": "You are already enrolled in this training.",
+  "You must complete a Mint Lift Group Training or Supplemental training first": "You must complete a Mint Lift Group Training or Supplemental training first.",
+  "Enrollment not found": "Enrollment not found.",
+  // Training cancellation
+  "Training is already cancelled or completed": "This training is already cancelled or completed.",
+  "Training can only be cancelled when there is exactly 1 paid enrollee and no observers": "Training can only be cancelled when there is exactly 1 paid enrollee and no observers.",
+  "No payment found for this enrollment": "No payment record found for this enrollment.",
+  // Sales rep
+  "A user with that email or phone number already exists": "A user with that email or phone number already exists.",
+  // Documents
+  "Folder not found": "Folder not found.",
+  "Document not found": "Document not found.",
+  "Parent folder not found": "Parent folder not found.",
 };
 
 const FALLBACK_MESSAGES: Record<string, string> = {
@@ -74,6 +91,20 @@ const FALLBACK_MESSAGES: Record<string, string> = {
   getContestEntryByIdAdmin: "Failed to load contest entry details.",
   toggleContestLike: "Failed to update like. Please try again.",
   getBAStats: "Failed to load B&A statistics.",
+  // Training payment
+  createPaymentIntent: "Failed to initiate payment. Please try again.",
+  confirmPayment: "Failed to confirm payment. Please try again.",
+  // Sales rep
+  getTransactions: "Failed to load transactions.",
+  getEnrollees: "Failed to load enrollees.",
+  listSalesReps: "Failed to load sales representatives.",
+  createSalesRep: "Failed to create sales rep account. Please try again.",
+  // Training documents
+  getFolders: "Failed to load folders.",
+  createFolder: "Failed to create folder. Please try again.",
+  uploadDocument: "Failed to upload document. Please try again.",
+  deleteFolder: "Failed to delete folder. Please try again.",
+  deleteDocument: "Failed to delete document. Please try again.",
 };
 
 export function sanitizeError(error: unknown, operation: string): string {
@@ -83,8 +114,11 @@ export function sanitizeError(error: unknown, operation: string): string {
       return SAFE_MESSAGES[error.message];
     }
 
-    // Pass through contest eligibility messages (dynamic text)
-    if (error.message.startsWith("You need at least")) {
+    // Pass through dynamic messages that are safe to show users
+    if (
+      error.message.startsWith("You need at least") ||
+      error.message.startsWith("You must complete")
+    ) {
       return error.message;
     }
 

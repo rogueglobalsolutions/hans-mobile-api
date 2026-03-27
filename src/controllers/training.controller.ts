@@ -214,25 +214,45 @@ export async function getTrainingById(req: Request, res: Response) {
   }
 }
 
-// ─── MED: Enroll ─────────────────────────────────────────────────────────────
+// ─── Admin: Cancel Training ───────────────────────────────────────────────────
 
 /**
- * POST /api/trainings/:id/enroll
- * Enroll the authenticated MED user in a training.
+ * POST /api/admin/trainings/:id/cancel
+ * Cancel a training with exactly 1 paid enrollee and issue a refund.
  */
-export async function enrollUser(req: Request, res: Response) {
+export async function cancelTraining(req: Request, res: Response) {
   try {
     const trainingId = req.params.id as string;
-    const userId = (req as any).userId as string;
-
-    const result = await trainingService.enrollUser(userId, trainingId);
-
+    const adminId = (req as any).userId as string;
+    const result = await trainingService.cancelTraining(trainingId, adminId);
     return res.json({ success: true, message: result.message });
   } catch (err: any) {
-    if (err.message === "Training not found") {
-      return res.status(404).json({ success: false, message: "Training not found" });
+    const knownErrors = [
+      "Training not found",
+      "Training is already cancelled",
+      "Training can only be cancelled",
+      "No payment found",
+    ];
+    if (knownErrors.some((e) => err.message?.includes(e))) {
+      return res.status(400).json({ success: false, message: err.message });
     }
-    console.error("[enrollUser]", err);
-    return res.status(500).json({ success: false, message: "Failed to enroll in training" });
+    console.error("[cancelTraining]", err);
+    return res.status(500).json({ success: false, message: "Failed to cancel training" });
+  }
+}
+
+// ─── Admin: Enrollees for a Training ─────────────────────────────────────────
+
+/**
+ * GET /api/admin/trainings/:id/enrollees
+ */
+export async function getTrainingEnrollees(req: Request, res: Response) {
+  try {
+    const trainingId = req.params.id as string;
+    const enrollees = await trainingService.getTrainingEnrollees(trainingId);
+    return res.json({ success: true, data: enrollees });
+  } catch (err: any) {
+    console.error("[getTrainingEnrollees]", err);
+    return res.status(500).json({ success: false, message: "Failed to retrieve enrollees" });
   }
 }
