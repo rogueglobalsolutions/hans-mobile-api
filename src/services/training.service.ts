@@ -215,7 +215,7 @@ export async function initiateEnrollment(
     amount: amountCents,
     currency: "usd",
     metadata: { trainingId, userId, enrollmentType },
-    automatic_payment_methods: { enabled: true },
+    payment_method_types: ['card'], // add 'paypal' here later
   });
 
   // Upsert pending enrollment (handle case where user retries after failed payment)
@@ -259,7 +259,7 @@ export async function initiateEnrollment(
 export async function confirmEnrollmentPayment(paymentIntentId: string) {
   const enrollment = await prisma.enrollment.findFirst({
     where: { stripePaymentIntentId: paymentIntentId },
-    include: { training: true },
+    include: { training: true, user: true },
   });
 
   if (!enrollment) throw new Error("Enrollment not found");
@@ -290,6 +290,25 @@ export async function confirmEnrollmentPayment(paymentIntentId: string) {
       });
     }
   });
+
+  // Send enrollment confirmation email (don't block payment confirmation on email failure)
+  try {
+    const { sendEnrollmentConfirmationEmail } = await import("./email.service");
+    await sendEnrollmentConfirmationEmail({
+      to: enrollment.user.email,
+      fullName: enrollment.user.fullName,
+      training: {
+        title: enrollment.training.title,
+        scheduledAt: enrollment.training.scheduledAt,
+        location: enrollment.training.location || "",
+        speaker: enrollment.training.speaker || "",
+        level: enrollment.training.level,
+      },
+      enrollmentType: enrollment.type as "ENROLLEE" | "OBSERVER",
+    });
+  } catch (emailError) {
+    console.error("Failed to send enrollment confirmation email:", emailError);
+  }
 
   return { message: "Enrollment confirmed", alreadyConfirmed: false };
 }

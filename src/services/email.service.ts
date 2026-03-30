@@ -170,6 +170,123 @@ export async function sendTrainingCancellationEmail(
   }
 }
 
+export interface EnrollmentEmailData {
+  to: string;
+  fullName: string;
+  training: {
+    title: string;
+    scheduledAt: string | Date;
+    location: string;
+    speaker: string;
+    level: string;
+  };
+  enrollmentType: "ENROLLEE" | "OBSERVER";
+}
+
+export async function sendEnrollmentConfirmationEmail(data: EnrollmentEmailData): Promise<boolean> {
+  const { to, fullName, training, enrollmentType } = data;
+  const trainingDate = new Date(training.scheduledAt).toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  const levelDisplay = training.level.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+    console.log(`\n========== ENROLLMENT CONFIRMATION EMAIL ==========`);
+    console.log(`To: ${to}`);
+    console.log(`Name: ${fullName}`);
+    console.log(`Training: ${training.title}`);
+    console.log(`Date: ${trainingDate}`);
+    console.log(`Type: ${enrollmentType}`);
+    console.log(`===================================================\n`);
+    return true;
+  }
+
+  const didacticSection =
+    enrollmentType === "ENROLLEE"
+      ? `
+        <h3 style="color: #15355E;">1. For Hands-on Trainees: Online Didactic and Quiz</h3>
+        <p>Check the inbox of the email you listed in the training consent form. As a trainee, you are automatically enrolled in our Hans Academy and should have received 2 email notifications inviting you to reset your password and another to access your Pre-training course materials.</p>
+        <p>Please visit the following link to access your Pre-training materials:<br/>
+        <a href="https://academy.hansbiomed.us" style="color: #2563eb;">Foundational Course Link</a></p>
+        <ul>
+          <li>Watch the assigned MINT didactic video(s).</li>
+          <li>Complete and pass the assessment quiz (minimum score: 80%).</li>
+        </ul>
+        <p style="font-size: 13px; color: #666;">Note: If you encounter issues accessing the platform, send an email to info@hansbiomed.us.</p>
+      `
+      : `
+        <h3 style="color: #15355E;">2. For Observers</h3>
+        <p>The online didactic steps are optional.</p>
+        <p>If you would like access to the didactic materials, please contact your MINT Lift sales representative.</p>
+      `;
+
+  try {
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+      to,
+      subject: `MINT Training Registration Confirmation — ${training.title}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #333;">
+          <h2 style="color: #15355E;">MINT Training Registration Confirmation</h2>
+          <p>Dear MINT trainees,</p>
+          <p>Thank you for registering for the <strong>${training.title}</strong> session on <strong>${trainingDate}</strong>, in <strong>${training.location}</strong>. We are excited to have you join us and look forward to a valuable and impactful session together.</p>
+          <p>This email includes important details to help you prepare for the training. Please read carefully and complete the required steps in advance.</p>
+
+          <hr style="border: none; border-top: 2px solid #E5E7EB; margin: 24px 0;" />
+
+          <h2 style="color: #15355E;">TRAINING SCHEDULE AND LOGISTICS</h2>
+          <div style="background: #f0f4ff; border-radius: 8px; padding: 16px; margin: 16px 0;">
+            <p style="margin: 0 0 8px;"><strong>Training Date:</strong> ${trainingDate}</p>
+            <p style="margin: 0 0 8px;"><strong>Training Level:</strong> ${levelDisplay}</p>
+            <p style="margin: 0 0 8px;"><strong>Trainer:</strong> ${training.speaker}</p>
+            <p style="margin: 0;"><strong>Location:</strong> ${training.location}</p>
+          </div>
+          <p>Please arrive 15 minutes early to help ensure a seamless start to the day. We will not wait for any trainees who are late. Model patients are to arrive 20 minutes before your designated hands-on time and are not allowed in the procedure room. All model patients will wait in the lounge until their turn for the procedure. This is to respect the semi-private environment, allow the training to flow swiftly, and due to limited space.</p>
+
+          <hr style="border: none; border-top: 2px solid #E5E7EB; margin: 24px 0;" />
+
+          <h2 style="color: #15355E;">PRE-TRAINING DIDACTIC REQUIREMENTS</h2>
+          <p>During training, lecture material will be reviewed very briefly and the trainer will answer any last-minute questions before starting the hands-on segment so please make sure to study the materials in advance. We will assume you have watched the didactic and pace the hands-on training accordingly.</p>
+          ${didacticSection}
+
+          <hr style="border: none; border-top: 2px solid #E5E7EB; margin: 24px 0;" />
+
+          <h2 style="color: #15355E;">MARKETING MATERIALS</h2>
+          <p>Leverage our marketing resources to prepare your clinic! <em>(Intellectual Property of Hans Biomed USA, Inc. - Confidential - Not to be shared with any 3rd party)</em></p>
+          <p>Inform your patients in advance that you will be adding MINT Lift threads to your clinic. The most successful clinics start marketing efforts early to build hype and book patients immediately after the training.</p>
+          <p>Explore digital assets for social media &amp; website content, sample patient consent forms, promotional content, clinical articles, and much more via this link:<br/>
+          <a href="https://mintpdo.com/digital-assets" style="color: #2563eb;">MINT Lift Digital Assets</a></p>
+          <p>Print marketing materials such as patient brochures, are included as a complementary support with every MINT product order.</p>
+
+          <hr style="border: none; border-top: 2px solid #E5E7EB; margin: 24px 0;" />
+
+          <h2 style="color: #15355E;">NEXT STEPS</h2>
+          <ul>
+            <li>Complete pre-training material.</li>
+            <li>Confirm model-patient details and ensure adherence to guidelines.</li>
+            <li>After the training, your MINT Lift sales rep will guide you through your first thread order.</li>
+          </ul>
+          <p><strong>Tip:</strong> Using the product soon after your training will help build your confidence and reinforce the skills you've learned.</p>
+          <p>If you haven't done so already, create your clinic account at <a href="https://store.mintpdo.com" style="color: #2563eb;">https://store.mintpdo.com</a> and bookmark this link for future orders.</p>
+
+          <hr style="border: none; border-top: 2px solid #E5E7EB; margin: 24px 0;" />
+
+          <p>Thank you, and we'll see you soon for an exciting day of learning and growth!</p>
+          <p style="color: #999; font-size: 12px; margin-top: 30px;">Hans Biomed USA, Inc.</p>
+        </div>
+      `,
+    });
+    return true;
+  } catch (error) {
+    console.error("Failed to send enrollment confirmation email:", error);
+    return false;
+  }
+}
+
 export async function sendVerificationStatusEmail(
   to: string,
   status: "approved" | "rejected",
