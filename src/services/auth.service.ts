@@ -19,6 +19,22 @@ interface RegisterInput {
   stateProvince?: string;
   zipCode?: string;
   address?: string;
+  // Medical Director
+  medDirectorFullName?: string;
+  medDirectorTitle?: string;
+  medDirectorTitleOther?: string;
+  // Business Information
+  practiceName?: string;
+  practiceAddressLine1?: string;
+  practiceAddressLine2?: string;
+  practiceCity?: string;
+  practiceState?: string;
+  practiceZipCode?: string;
+  practicePhone?: string;
+  isExistingCustomer?: boolean;
+  // Agreements
+  agreedToTerms?: boolean;
+  subscribedToUpdates?: boolean;
 }
 
 interface LoginInput {
@@ -68,6 +84,19 @@ export async function register(input: RegisterInput) {
       stateProvince: input.stateProvince?.trim() || null,
       zipCode: input.zipCode?.trim() || null,
       address: input.address?.trim() || null,
+      medDirectorFullName: input.medDirectorFullName?.trim() || null,
+      medDirectorTitle: input.medDirectorTitle?.trim() || null,
+      medDirectorTitleOther: input.medDirectorTitleOther?.trim() || null,
+      practiceName: input.practiceName?.trim() || null,
+      practiceAddressLine1: input.practiceAddressLine1?.trim() || null,
+      practiceAddressLine2: input.practiceAddressLine2?.trim() || null,
+      practiceCity: input.practiceCity?.trim() || null,
+      practiceState: input.practiceState?.trim() || null,
+      practiceZipCode: input.practiceZipCode?.trim() || null,
+      practicePhone: input.practicePhone?.trim() || null,
+      isExistingCustomer: input.isExistingCustomer ?? null,
+      agreedToTerms: input.agreedToTerms ?? false,
+      subscribedToUpdates: input.subscribedToUpdates ?? false,
     },
   });
 

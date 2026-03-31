@@ -94,6 +94,22 @@ model User {
   stateProvince             String?
   zipCode                   String?
   address                   String?
+  // Medical Director (MED role)
+  medDirectorFullName       String?
+  medDirectorTitle          String?
+  medDirectorTitleOther     String?
+  // Business Information (MED role)
+  practiceName              String?
+  practiceAddressLine1      String?
+  practiceAddressLine2      String?
+  practiceCity              String?
+  practiceState             String?
+  practiceZipCode           String?
+  practicePhone             String?
+  isExistingCustomer        Boolean?
+  // Agreements
+  agreedToTerms             Boolean              @default(false)
+  subscribedToUpdates       Boolean              @default(false)
   createdAt                 DateTime             @default(now())
   updatedAt                 DateTime             @updatedAt
   otps                      Otp[]
