@@ -117,7 +117,8 @@ model User {
   salesRepEnrollments       Enrollment[]         @relation("SalesRepEnrollments")
   creditTransactions        CreditTransaction[]
   chatMessages              ChatMessage[]
-  appointments              Appointment[]
+  appointments              Appointment[]        @relation("MedAppointments")
+  salesRepAppointments      Appointment[]        @relation("SalesRepAppointments")
   baEntries                 BeforeAndAfterEntry[]  @relation("UserBAEntries")
   contestEntries            ContestEntry[]         @relation("UserContestEntries")
   contestLikes              ContestLike[]          @relation("AdminContestLikes")
@@ -197,7 +198,9 @@ model CreditTransaction {
 model Appointment {
   id              String            @id @default(uuid())
   medUserId       String
-  medUser         User              @relation(fields: [medUserId], references: [id], onDelete: Cascade)
+  medUser         User              @relation("MedAppointments", fields: [medUserId], references: [id], onDelete: Cascade)
+  salesRepId      String?
+  salesRep        User?             @relation("SalesRepAppointments", fields: [salesRepId], references: [id], onDelete: SetNull)
   date            String            // "YYYY-MM-DD" e.g. "2026-03-18"
   time            String            // e.g. "10:00 AM"
   notes           String?           // Optional context from MED user

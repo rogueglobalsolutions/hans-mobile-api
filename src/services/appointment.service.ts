@@ -8,6 +8,7 @@ import {
 
 interface CreateAppointmentInput {
   medUserId: string;
+  salesRepId?: string;
   date: string;   // "YYYY-MM-DD"
   time: string;   // "10:00 AM"
   notes?: string;
@@ -17,6 +18,7 @@ interface CreateAppointmentInput {
 
 export async function createAppointment({
   medUserId,
+  salesRepId,
   date,
   time,
   notes,
@@ -52,6 +54,7 @@ export async function createAppointment({
   await prisma.appointment.create({
     data: {
       medUserId,
+      salesRepId: salesRepId || null,
       date,
       time,
       notes: notes?.trim() || null,
@@ -64,6 +67,9 @@ export async function createAppointment({
 export async function getMyAppointments(medUserId: string) {
   const appointments = await prisma.appointment.findMany({
     where: { medUserId },
+    include: {
+      salesRep: { select: { fullName: true } },
+    },
     orderBy: { createdAt: "desc" },
   });
 
@@ -75,6 +81,7 @@ export async function getMyAppointments(medUserId: string) {
     status: a.status,
     zoomLink: a.zoomLink,
     rejectionReason: a.rejectionReason,
+    salesRepName: a.salesRep?.fullName ?? null,
     createdAt: a.createdAt,
   }));
 }
@@ -97,6 +104,9 @@ export async function getAppointmentRequests() {
       medUser: {
         select: { fullName: true, email: true },
       },
+      salesRep: {
+        select: { fullName: true },
+      },
     },
     orderBy: { createdAt: "asc" },
   });
@@ -109,6 +119,7 @@ export async function getAppointmentRequests() {
     time: a.time,
     notes: a.notes,
     status: a.status,
+    salesRepName: a.salesRep?.fullName ?? null,
     createdAt: a.createdAt,
   }));
 }
@@ -179,6 +190,126 @@ export async function completeAppointment(appointmentId: string) {
   });
 
   if (!appointment) throw new Error("Appointment not found");
+  if (appointment.status !== "APPROVED") {
+    throw new Error("Only approved appointments can be marked as completed");
+  }
+
+  await prisma.appointment.update({
+    where: { id: appointmentId },
+    data: { status: "COMPLETED" },
+  });
+
+  return { message: "Appointment marked as completed" };
+}
+
+// ─── Sales Rep operations ─────────────────────────────────────────────────────
+
+export async function getSalesRepAppointments(salesRepId: string) {
+  const appointments = await prisma.appointment.findMany({
+    where: { salesRepId },
+    include: {
+      medUser: { select: { fullName: true, email: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return appointments.map((a) => ({
+    id: a.id,
+    requesterName: a.medUser.fullName,
+    requesterEmail: a.medUser.email,
+    date: a.date,
+    time: a.time,
+    notes: a.notes,
+    status: a.status,
+    createdAt: a.createdAt,
+  }));
+}
+
+export async function approveAppointmentBySalesRep(
+  appointmentId: string,
+  salesRepId: string
+) {
+  const appointment = await prisma.appointment.findUnique({
+    where: { id: appointmentId },
+    include: {
+      medUser: { select: { fullName: true, email: true } },
+    },
+  });
+
+  if (!appointment) throw new Error("Appointment not found");
+  if (appointment.salesRepId !== salesRepId) {
+    throw new Error("You are not authorized to manage this appointment");
+  }
+  if (appointment.status !== "PENDING") {
+    throw new Error("Only pending appointments can be approved");
+  }
+
+  const zoomLink = process.env.ZOOM_MEETING_LINK ?? "";
+
+  await prisma.appointment.update({
+    where: { id: appointmentId },
+    data: { status: "APPROVED", zoomLink },
+  });
+
+  await sendAppointmentApprovalEmail(
+    appointment.medUser.email,
+    appointment.medUser.fullName,
+    appointment.date,
+    appointment.time,
+    zoomLink
+  );
+
+  return { message: "Appointment approved successfully" };
+}
+
+export async function rejectAppointmentBySalesRep(
+  appointmentId: string,
+  salesRepId: string,
+  reason: string
+) {
+  const appointment = await prisma.appointment.findUnique({
+    where: { id: appointmentId },
+    include: {
+      medUser: { select: { fullName: true, email: true } },
+    },
+  });
+
+  if (!appointment) throw new Error("Appointment not found");
+  if (appointment.salesRepId !== salesRepId) {
+    throw new Error("You are not authorized to manage this appointment");
+  }
+  if (appointment.status !== "PENDING") {
+    throw new Error("Only pending appointments can be rejected");
+  }
+
+  await prisma.appointment.update({
+    where: { id: appointmentId },
+    data: { status: "REJECTED", rejectionReason: reason },
+  });
+
+  await sendAppointmentRejectionEmail(
+    appointment.medUser.email,
+    appointment.medUser.fullName,
+    appointment.date,
+    appointment.time,
+    reason
+  );
+
+  return { message: "Appointment rejected successfully" };
+}
+
+export async function completeAppointmentBySalesRep(
+  appointmentId: string,
+  salesRepId: string
+) {
+  const appointment = await prisma.appointment.findUnique({
+    where: { id: appointmentId },
+  });
+
+  if (!appointment) throw new Error("Appointment not found");
+  if (appointment.salesRepId !== salesRepId) {
+    throw new Error("You are not authorized to manage this appointment");
+  }
   if (appointment.status !== "APPROVED") {
     throw new Error("Only approved appointments can be marked as completed");
   }
