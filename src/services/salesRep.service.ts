@@ -35,7 +35,7 @@ export async function getEnrolleesByTraining() {
       enrollments: {
         where: { paymentStatus: PaymentStatus.COMPLETED },
         include: {
-          user:     { select: { id: true, fullName: true, email: true, phoneNumber: true } },
+          user:     { select: { id: true, fullName: true, email: true, phoneNumber: true, profilePicturePath: true } },
           salesRep: { select: { id: true, fullName: true } },
         },
         orderBy: { paidAt: "desc" },

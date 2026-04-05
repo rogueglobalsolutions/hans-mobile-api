@@ -17,6 +17,7 @@ import * as salesRepController from "./controllers/salesRep.controller";
 import { authenticateToken, requireRole } from "./middleware/auth";
 import { Role } from "./generated/prisma/enums";
 import { initSocket } from "./socket";
+import supportRoutes from "./routes/support.routes";
 
 dotenv.config();
 
@@ -47,6 +48,7 @@ app.use("/api/appointments", appointmentRoutes);
 app.use("/api/ba", baRoutes);
 app.use("/api/sales-rep", salesRepRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/api/support", supportRoutes); 
 
 // Public — list sales reps for registration dropdown (MED + ADMIN)
 app.get(

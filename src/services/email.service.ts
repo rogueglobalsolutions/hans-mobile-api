@@ -341,3 +341,49 @@ export async function sendVerificationStatusEmail(
     return false;
   }
 }
+
+export async function sendSupportEmail(
+  fromEmail: string,
+  fromName: string,
+  category: string,
+  message: string
+): Promise<boolean> {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+    console.log(`\n========== SUPPORT EMAIL ==========`);
+    console.log(`From: ${fromName} <${fromEmail}>`);
+    console.log(`Category: ${category}`);
+    console.log(`Message: ${message}`);
+    console.log(`===================================\n`);
+    return true;
+  }
+
+  try {
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+      to: 'contact.rogueglobalsolutions@gmail.com',
+      replyTo: fromEmail,
+      subject: `[Help & Support] ${category} — from ${fromName}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto;">
+          <h2 style="color: #15355E;">New Support Request</h2>
+          <div style="background: #f0f4ff; border-radius: 8px; padding: 16px; margin: 16px 0;">
+            <p style="margin: 0 0 8px;"><strong>From:</strong> ${fromName}</p>
+            <p style="margin: 0 0 8px;"><strong>Email:</strong> ${fromEmail}</p>
+            <p style="margin: 0;"><strong>Category:</strong> ${category}</p>
+          </div>
+          <h3 style="color: #15355E;">Message:</h3>
+          <div style="background: #f9fafb; border-left: 4px solid #15355E; padding: 12px 16px; border-radius: 4px;">
+            <p style="margin: 0; white-space: pre-wrap;">${message}</p>
+          </div>
+          <p style="color: #999; font-size: 12px; margin-top: 30px;">
+            Sent via Hans Mobile App — Help & Support
+          </p>
+        </div>
+      `,
+    });
+    return true;
+  } catch (error) {
+    console.error('Failed to send support email:', error);
+    return false;
+  }
+}
