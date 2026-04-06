@@ -15,6 +15,7 @@ import salesRepRoutes from "./routes/salesRep.routes";
 import paymentRoutes from "./routes/payment.routes";
 import * as salesRepController from "./controllers/salesRep.controller";
 import { authenticateToken, requireRole } from "./middleware/auth";
+import { requestLogger } from "./middleware/requestLogger";
 import { Role } from "./generated/prisma/enums";
 import { initSocket } from "./socket";
 import supportRoutes from "./routes/support.routes";
@@ -26,6 +27,7 @@ const server = http.createServer(app);
 initSocket(server);
 
 // Middleware
+app.use(requestLogger);
 app.use(cors());
 app.use(express.json());
 
