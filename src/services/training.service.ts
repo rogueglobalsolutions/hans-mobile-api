@@ -28,13 +28,13 @@ export interface CreateTrainingInput {
   createdBy: string;
 }
 
-const PREREQUISITE_LEVELS = new Set([
+const PREREQUISITE_LEVELS = new Set<TrainingLevel>([
   TrainingLevel.ADVANCED,
   TrainingLevel.PACKAGE_BUNDLE_1,
   TrainingLevel.PACKAGE_BUNDLE_2,
 ]);
 
-const QUALIFYING_LEVELS = new Set([
+const QUALIFYING_LEVELS = new Set<TrainingLevel>([
   TrainingLevel.MINT_LIFT_GROUP_TRAINING,
   TrainingLevel.SUPPLEMENTAL,
 ]);
@@ -299,7 +299,7 @@ export async function confirmEnrollmentPayment(paymentIntentId: string) {
       fullName: enrollment.user.fullName,
       training: {
         title: enrollment.training.title,
-        scheduledAt: enrollment.training.scheduledAt,
+        scheduledAt: enrollment.training.scheduledAt as Date,
         location: enrollment.training.location || "",
         speaker: enrollment.training.speaker || "",
         level: enrollment.training.level,

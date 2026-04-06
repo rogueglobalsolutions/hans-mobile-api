@@ -87,7 +87,7 @@ export async function getAppointmentRequests(req: Request, res: Response) {
 
 export async function approveAppointment(req: Request, res: Response) {
   try {
-    const appointmentId = req.params.id;
+    const appointmentId = req.params.id as string;
     const result = await appointmentService.approveAppointment(appointmentId);
 
     res.json({ success: true, message: result.message });
@@ -98,7 +98,7 @@ export async function approveAppointment(req: Request, res: Response) {
 
 export async function rejectAppointment(req: Request, res: Response) {
   try {
-    const appointmentId = req.params.id;
+    const appointmentId = req.params.id as string;
     const { reason } = req.body;
 
     if (!reason || typeof reason !== "string" || !reason.trim()) {
@@ -116,7 +116,7 @@ export async function rejectAppointment(req: Request, res: Response) {
 
 export async function completeAppointment(req: Request, res: Response) {
   try {
-    const appointmentId = req.params.id;
+    const appointmentId = req.params.id as string;
     const result = await appointmentService.completeAppointment(appointmentId);
 
     res.json({ success: true, message: result.message });
@@ -145,7 +145,7 @@ export async function getSalesRepAppointments(req: Request, res: Response) {
 export async function approveAppointmentBySalesRep(req: Request, res: Response) {
   try {
     const salesRepId = (req as any).userId;
-    const appointmentId = req.params.id;
+    const appointmentId = req.params.id as string;
     const result = await appointmentService.approveAppointmentBySalesRep(appointmentId, salesRepId);
 
     res.json({ success: true, message: result.message });
@@ -157,7 +157,7 @@ export async function approveAppointmentBySalesRep(req: Request, res: Response) 
 export async function rejectAppointmentBySalesRep(req: Request, res: Response) {
   try {
     const salesRepId = (req as any).userId;
-    const appointmentId = req.params.id;
+    const appointmentId = req.params.id as string;
     const { reason } = req.body;
 
     if (!reason || typeof reason !== "string" || !reason.trim()) {
@@ -180,7 +180,7 @@ export async function rejectAppointmentBySalesRep(req: Request, res: Response) {
 export async function completeAppointmentBySalesRep(req: Request, res: Response) {
   try {
     const salesRepId = (req as any).userId;
-    const appointmentId = req.params.id;
+    const appointmentId = req.params.id as string;
     const result = await appointmentService.completeAppointmentBySalesRep(appointmentId, salesRepId);
 
     res.json({ success: true, message: result.message });
