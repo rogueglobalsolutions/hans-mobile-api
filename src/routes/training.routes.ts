@@ -16,9 +16,4 @@ router.get("/", requireRole(Role.MED, Role.ADMIN), trainingController.getTrainin
 // Get full details of a specific training (includes isEnrolled for the requester)
 router.get("/:id", requireRole(Role.MED, Role.ADMIN), trainingController.getTrainingById);
 
-// ─── MED-only routes ──────────────────────────────────────────────────────────
-
-// Enroll the authenticated MED user in a training
-router.post("/:id/enroll", requireRole(Role.MED), trainingController.enrollUser);
-
 export default router;

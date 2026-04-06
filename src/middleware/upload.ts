@@ -150,6 +150,48 @@ export const uploadContestMedia = multer({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB for videos
 });
 
+// ─── Training documents ───────────────────────────────────────────────────────
+
+const trainingDocsDir = path.join(process.cwd(), "uploads", "training-docs");
+if (!fs.existsSync(trainingDocsDir)) {
+  fs.mkdirSync(trainingDocsDir, { recursive: true });
+}
+
+const trainingDocStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, trainingDocsDir);
+  },
+  filename: (_req, file, cb) => {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    cb(null, `doc_${timestamp}_${Math.random().toString(36).slice(2, 6)}${ext}`);
+  },
+});
+
+const trainingDocFileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  // Allow images, PDFs, and common document types
+  const allowedMimes = [
+    "image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/octet-stream",
+  ];
+  if (allowedMimes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error("Invalid file type. Only images, PDFs, and documents are allowed."));
+  }
+};
+
+export const uploadTrainingDocs = multer({
+  storage: trainingDocStorage,
+  fileFilter: trainingDocFileFilter,
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
+});
+
 // ─── Chat images ──────────────────────────────────────────────────────────────
 
 const chatImagesDir = path.join(process.cwd(), "uploads", "chat");

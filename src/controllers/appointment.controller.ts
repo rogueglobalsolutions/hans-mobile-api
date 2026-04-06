@@ -7,7 +7,7 @@ import { sanitizeError } from "../utils/errors";
 export async function createAppointment(req: Request, res: Response) {
   try {
     const medUserId = (req as any).userId;
-    const { date, time, notes } = req.body;
+    const { date, time, notes, salesRepId } = req.body;
 
     const errors: string[] = [];
 
@@ -17,6 +17,9 @@ export async function createAppointment(req: Request, res: Response) {
     if (!time || typeof time !== "string" || !time.trim()) {
       errors.push("Time is required");
     }
+    if (!salesRepId || typeof salesRepId !== "string" || !salesRepId.trim()) {
+      errors.push("A sales representative must be selected");
+    }
 
     if (errors.length > 0) {
       res.status(400).json({ success: false, message: "Validation failed", errors });
@@ -25,6 +28,7 @@ export async function createAppointment(req: Request, res: Response) {
 
     const result = await appointmentService.createAppointment({
       medUserId,
+      salesRepId: salesRepId.trim(),
       date: date.trim(),
       time: time.trim(),
       notes: typeof notes === "string" ? notes.trim() : undefined,
@@ -83,7 +87,7 @@ export async function getAppointmentRequests(req: Request, res: Response) {
 
 export async function approveAppointment(req: Request, res: Response) {
   try {
-    const appointmentId = req.params.id;
+    const appointmentId = req.params.id as string;
     const result = await appointmentService.approveAppointment(appointmentId);
 
     res.json({ success: true, message: result.message });
@@ -94,7 +98,7 @@ export async function approveAppointment(req: Request, res: Response) {
 
 export async function rejectAppointment(req: Request, res: Response) {
   try {
-    const appointmentId = req.params.id;
+    const appointmentId = req.params.id as string;
     const { reason } = req.body;
 
     if (!reason || typeof reason !== "string" || !reason.trim()) {
@@ -112,11 +116,75 @@ export async function rejectAppointment(req: Request, res: Response) {
 
 export async function completeAppointment(req: Request, res: Response) {
   try {
-    const appointmentId = req.params.id;
+    const appointmentId = req.params.id as string;
     const result = await appointmentService.completeAppointment(appointmentId);
 
     res.json({ success: true, message: result.message });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "completeAppointment") });
+  }
+}
+
+// ─── Sales Rep handlers ───────────────────────────────────────────────────────
+
+export async function getSalesRepAppointments(req: Request, res: Response) {
+  try {
+    const salesRepId = (req as any).userId;
+    const data = await appointmentService.getSalesRepAppointments(salesRepId);
+
+    res.json({
+      success: true,
+      message: "Appointments retrieved successfully",
+      data,
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: sanitizeError(error, "getSalesRepAppointments") });
+  }
+}
+
+export async function approveAppointmentBySalesRep(req: Request, res: Response) {
+  try {
+    const salesRepId = (req as any).userId;
+    const appointmentId = req.params.id as string;
+    const result = await appointmentService.approveAppointmentBySalesRep(appointmentId, salesRepId);
+
+    res.json({ success: true, message: result.message });
+  } catch (error) {
+    res.status(400).json({ success: false, message: sanitizeError(error, "approveAppointmentBySalesRep") });
+  }
+}
+
+export async function rejectAppointmentBySalesRep(req: Request, res: Response) {
+  try {
+    const salesRepId = (req as any).userId;
+    const appointmentId = req.params.id as string;
+    const { reason } = req.body;
+
+    if (!reason || typeof reason !== "string" || !reason.trim()) {
+      res.status(400).json({ success: false, message: "Rejection reason is required" });
+      return;
+    }
+
+    const result = await appointmentService.rejectAppointmentBySalesRep(
+      appointmentId,
+      salesRepId,
+      reason.trim()
+    );
+
+    res.json({ success: true, message: result.message });
+  } catch (error) {
+    res.status(400).json({ success: false, message: sanitizeError(error, "rejectAppointmentBySalesRep") });
+  }
+}
+
+export async function completeAppointmentBySalesRep(req: Request, res: Response) {
+  try {
+    const salesRepId = (req as any).userId;
+    const appointmentId = req.params.id as string;
+    const result = await appointmentService.completeAppointmentBySalesRep(appointmentId, salesRepId);
+
+    res.json({ success: true, message: result.message });
+  } catch (error) {
+    res.status(400).json({ success: false, message: sanitizeError(error, "completeAppointmentBySalesRep") });
   }
 }

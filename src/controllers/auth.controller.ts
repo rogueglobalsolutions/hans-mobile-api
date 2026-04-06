@@ -10,7 +10,14 @@ function isValidEmail(email: string): boolean {
 
 export async function register(req: Request, res: Response) {
   try {
-    const { fullName, email, phoneNumber, password, confirmPassword, role, country, city, stateProvince, zipCode, address } = req.body;
+    const {
+      fullName, email, phoneNumber, password, confirmPassword, role,
+      country, city, stateProvince, zipCode, address,
+      medDirectorFullName, medDirectorTitle, medDirectorTitleOther,
+      practiceName, practiceAddressLine1, practiceAddressLine2,
+      practiceCity, practiceState, practiceZipCode, practicePhone,
+      isExistingCustomer, agreedToTerms, subscribedToUpdates,
+    } = req.body;
 
     const errors: string[] = [];
 
@@ -40,6 +47,14 @@ export async function register(req: Request, res: Response) {
       errors.push("Passwords do not match");
     }
 
+    // Validate practice phone if provided
+    if (practicePhone && practicePhone.trim()) {
+      const practicePhoneValidation = validateAndFormatPhone(practicePhone.trim());
+      if (!practicePhoneValidation.isValid) {
+        errors.push(practicePhoneValidation.error || "Invalid practice phone number format");
+      }
+    }
+
     // Validate role if provided
     if (role !== undefined) {
       const validRoles = [Role.USER, Role.MED];
@@ -64,6 +79,10 @@ export async function register(req: Request, res: Response) {
       return;
     }
 
+    const practicePhoneFormatted = practicePhone?.trim()
+      ? validateAndFormatPhone(practicePhone.trim()).formatted
+      : undefined;
+
     const user = await authService.register({
       fullName: fullName.trim(),
       email: email.toLowerCase().trim(),
@@ -75,6 +94,19 @@ export async function register(req: Request, res: Response) {
       stateProvince,
       zipCode,
       address,
+      medDirectorFullName,
+      medDirectorTitle,
+      medDirectorTitleOther,
+      practiceName,
+      practiceAddressLine1,
+      practiceAddressLine2,
+      practiceCity,
+      practiceState,
+      practiceZipCode,
+      practicePhone: practicePhoneFormatted,
+      isExistingCustomer,
+      agreedToTerms,
+      subscribedToUpdates,
     });
 
     res.status(201).json({

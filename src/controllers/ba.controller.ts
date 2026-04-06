@@ -74,7 +74,7 @@ export async function getMyEntries(req: Request, res: Response) {
 export async function getMyEntryById(req: Request, res: Response) {
   try {
     const userId = (req as any).userId as string;
-    const entry = await baService.getMyEntryById(userId, req.params.id);
+    const entry = await baService.getMyEntryById(userId, req.params.id as string);
     res.json({ success: true, data: entry });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "getMyBAEntryById") });
@@ -84,7 +84,7 @@ export async function getMyEntryById(req: Request, res: Response) {
 export async function deleteEntry(req: Request, res: Response) {
   try {
     const userId = (req as any).userId as string;
-    await baService.deleteEntry(userId, req.params.id);
+    await baService.deleteEntry(userId, req.params.id as string);
     res.json({ success: true, message: "Entry deleted successfully" });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "deleteBAEntry") });
@@ -172,7 +172,7 @@ export async function getMyContestEntries(req: Request, res: Response) {
 export async function getMyContestEntryById(req: Request, res: Response) {
   try {
     const userId = (req as any).userId as string;
-    const entry = await baService.getMyContestEntryById(userId, req.params.id);
+    const entry = await baService.getMyContestEntryById(userId, req.params.id as string);
     res.json({ success: true, data: entry });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "getMyContestEntryById") });
@@ -182,7 +182,7 @@ export async function getMyContestEntryById(req: Request, res: Response) {
 export async function deleteContestEntry(req: Request, res: Response) {
   try {
     const userId = (req as any).userId as string;
-    await baService.deleteContestEntry(userId, req.params.id);
+    await baService.deleteContestEntry(userId, req.params.id as string);
     res.json({ success: true, message: "Contest entry deleted successfully" });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "deleteContestEntry") });
@@ -202,7 +202,7 @@ export async function getAllEntries(req: Request, res: Response) {
 
 export async function getEntryByIdAdmin(req: Request, res: Response) {
   try {
-    const entry = await baService.getEntryByIdAdmin(req.params.id);
+    const entry = await baService.getEntryByIdAdmin(req.params.id as string);
     res.json({ success: true, data: entry });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "getBAEntryByIdAdmin") });
@@ -224,7 +224,7 @@ export async function getAllContestEntries(req: Request, res: Response) {
 export async function getContestEntryByIdAdmin(req: Request, res: Response) {
   try {
     const adminId = (req as any).userId as string;
-    const entry = await baService.getContestEntryByIdAdmin(adminId, req.params.id);
+    const entry = await baService.getContestEntryByIdAdmin(adminId, req.params.id as string);
     res.json({ success: true, data: entry });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "getContestEntryByIdAdmin") });
@@ -234,7 +234,7 @@ export async function getContestEntryByIdAdmin(req: Request, res: Response) {
 export async function toggleContestLike(req: Request, res: Response) {
   try {
     const adminId = (req as any).userId as string;
-    const result = await baService.toggleContestLike(adminId, req.params.id);
+    const result = await baService.toggleContestLike(adminId, req.params.id as string);
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "toggleContestLike") });

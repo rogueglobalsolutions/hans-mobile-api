@@ -11,6 +11,7 @@ enum Role {
   USER
   MED
   ADMIN
+  SALES_REP
 }
 
 enum AccountStatus {
@@ -39,6 +40,24 @@ enum TrainingLevel {
   ADVANCED
   PACKAGE_BUNDLE_1
   PACKAGE_BUNDLE_2
+}
+
+enum TrainingStatus {
+  ACTIVE
+  CANCELLED
+  COMPLETED
+}
+
+enum EnrollmentType {
+  ENROLLEE
+  OBSERVER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  REFUNDED
+  FAILED
 }
 
 enum CreditTransactionType {
@@ -75,13 +94,31 @@ model User {
   stateProvince             String?
   zipCode                   String?
   address                   String?
+  // Medical Director (MED role)
+  medDirectorFullName       String?
+  medDirectorTitle          String?
+  medDirectorTitleOther     String?
+  // Business Information (MED role)
+  practiceName              String?
+  practiceAddressLine1      String?
+  practiceAddressLine2      String?
+  practiceCity              String?
+  practiceState             String?
+  practiceZipCode           String?
+  practicePhone             String?
+  isExistingCustomer        Boolean?
+  // Agreements
+  agreedToTerms             Boolean              @default(false)
+  subscribedToUpdates       Boolean              @default(false)
   createdAt                 DateTime             @default(now())
   updatedAt                 DateTime             @updatedAt
   otps                      Otp[]
   enrollments               Enrollment[]
+  salesRepEnrollments       Enrollment[]         @relation("SalesRepEnrollments")
   creditTransactions        CreditTransaction[]
   chatMessages              ChatMessage[]
-  appointments              Appointment[]
+  appointments              Appointment[]        @relation("MedAppointments")
+  salesRepAppointments      Appointment[]        @relation("SalesRepAppointments")
   baEntries                 BeforeAndAfterEntry[]  @relation("UserBAEntries")
   contestEntries            ContestEntry[]         @relation("UserContestEntries")
   contestLikes              ContestLike[]          @relation("AdminContestLikes")
@@ -98,11 +135,11 @@ model Otp {
 }
 
 model Training {
-  id                  String        @id @default(uuid())
+  id                  String          @id @default(uuid())
   type                TrainingType
   brand               TrainingBrand
   level               TrainingLevel
-  learningFormats     Json          // String[] — validated values: "DEMO" | "DIDACTIC" | "DISCUSSION"
+  learningFormats     Json            // String[] — validated values: "DEMO" | "DIDACTIC" | "DISCUSSION"
   title               String
   speaker             String
   speakerIntro        String
@@ -110,23 +147,39 @@ model Training {
   areasCovered        String
   description         String
   backgroundImagePath String?
-  location            String?       // e.g. "Morristown, NJ"
-  scheduledAt         DateTime?     // When the training is scheduled
-  price               Int           // USD — auto-populated from level at creation
-  creditScore         Int           // In-house currency earned on enrollment — auto-populated from level
-  createdBy           String        // admin userId
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
+  location            String?         // e.g. "Morristown, NJ"
+  scheduledAt         DateTime?       // When the training is scheduled
+  price               Int             // USD — auto-populated from level at creation
+  creditScore         Int             // In-house currency earned on enrollment — auto-populated from level
+  status              TrainingStatus  @default(ACTIVE)
+  maxEnrollees        Int             @default(4)
+  maxObservers        Int             @default(2)
+  observerPrice       Int             @default(500) // USD
+  cancelledAt         DateTime?
+  cancelledBy         String?         // admin userId
+  createdBy           String          // admin userId
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
   enrollments         Enrollment[]
+  folders             TrainingFolder[]
 }
 
 model Enrollment {
-  id         String   @id @default(uuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  trainingId String
-  training   Training @relation(fields: [trainingId], references: [id], onDelete: Cascade)
-  enrolledAt DateTime @default(now())
+  id                    String         @id @default(uuid())
+  userId                String
+  user                  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trainingId            String
+  training              Training       @relation(fields: [trainingId], references: [id], onDelete: Cascade)
+  type                  EnrollmentType @default(ENROLLEE)
+  salesRepId            String?
+  salesRep              User?          @relation("SalesRepEnrollments", fields: [salesRepId], references: [id], onDelete: SetNull)
+  paymentStatus         PaymentStatus  @default(PENDING)
+  stripePaymentIntentId String?
+  stripeRefundId        String?
+  paidAmount            Int?           // USD dollars
+  paidAt                DateTime?
+  refundedAt            DateTime?
+  enrolledAt            DateTime       @default(now())
 
   @@unique([userId, trainingId])
 }
@@ -145,7 +198,9 @@ model CreditTransaction {
 model Appointment {
   id              String            @id @default(uuid())
   medUserId       String
-  medUser         User              @relation(fields: [medUserId], references: [id], onDelete: Cascade)
+  medUser         User              @relation("MedAppointments", fields: [medUserId], references: [id], onDelete: Cascade)
+  salesRepId      String?
+  salesRep        User?             @relation("SalesRepAppointments", fields: [salesRepId], references: [id], onDelete: SetNull)
   date            String            // "YYYY-MM-DD" e.g. "2026-03-18"
   time            String            // e.g. "10:00 AM"
   notes           String?           // Optional context from MED user
@@ -163,6 +218,31 @@ model ChatMessage {
   message   String?
   imageUrl  String?
   createdAt DateTime @default(now())
+}
+
+// ─── Training Documents ────────────────────────────────────────────────────────
+
+model TrainingFolder {
+  id         String             @id @default(uuid())
+  trainingId String
+  training   Training           @relation(fields: [trainingId], references: [id], onDelete: Cascade)
+  name       String
+  parentId   String?
+  parent     TrainingFolder?    @relation("FolderChildren", fields: [parentId], references: [id])
+  children   TrainingFolder[]   @relation("FolderChildren")
+  files      TrainingDocument[]
+  createdAt  DateTime           @default(now())
+}
+
+model TrainingDocument {
+  id        String         @id @default(uuid())
+  folderId  String
+  folder    TrainingFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  fileName  String
+  filePath  String
+  fileSize  Int
+  mimeType  String
+  createdAt DateTime       @default(now())
 }
 
 // ─── Before & After ───────────────────────────────────────────────────────────

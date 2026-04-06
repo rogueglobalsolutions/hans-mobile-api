@@ -11,7 +11,13 @@ import creditRoutes from "./routes/credit.routes";
 import chatRoutes from "./routes/chat.routes";
 import appointmentRoutes from "./routes/appointment.routes";
 import baRoutes from "./routes/ba.routes";
+import salesRepRoutes from "./routes/salesRep.routes";
+import paymentRoutes from "./routes/payment.routes";
+import * as salesRepController from "./controllers/salesRep.controller";
+import { authenticateToken, requireRole } from "./middleware/auth";
+import { Role } from "./generated/prisma/enums";
 import { initSocket } from "./socket";
+import supportRoutes from "./routes/support.routes";
 
 dotenv.config();
 
@@ -40,6 +46,17 @@ app.use("/api/credits", creditRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/appointments", appointmentRoutes);
 app.use("/api/ba", baRoutes);
+app.use("/api/sales-rep", salesRepRoutes);
+app.use("/api/payments", paymentRoutes);
+app.use("/api/support", supportRoutes); 
+
+// Public — list sales reps for registration dropdown (MED + ADMIN)
+app.get(
+  "/api/sales-reps",
+  authenticateToken,
+  requireRole(Role.MED, Role.ADMIN),
+  salesRepController.listSalesReps,
+);
 
 // Global error handler
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
