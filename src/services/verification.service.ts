@@ -172,6 +172,25 @@ export async function getMedUserById(userId: string) {
       verificationNotes: true,
       verifiedAt: true,
       createdAt: true,
+      // Personal location
+      country: true,
+      city: true,
+      stateProvince: true,
+      zipCode: true,
+      address: true,
+      // Medical director
+      medDirectorFullName: true,
+      medDirectorTitle: true,
+      medDirectorTitleOther: true,
+      // Business / practice
+      practiceName: true,
+      practiceAddressLine1: true,
+      practiceAddressLine2: true,
+      practiceCity: true,
+      practiceState: true,
+      practiceZipCode: true,
+      practicePhone: true,
+      isExistingCustomer: true,
     },
   });
 
