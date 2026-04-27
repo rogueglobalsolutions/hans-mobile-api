@@ -14,7 +14,7 @@ export async function register(req: Request, res: Response) {
       fullName, email, phoneNumber, password, confirmPassword, role,
       country, city, stateProvince, zipCode, address,
       medDirectorFullName, medDirectorTitle, medDirectorTitleOther,
-      practiceName, practiceAddressLine1, practiceAddressLine2,
+      practiceName, practiceAddressLine1, practiceAddressLine2, practiceCountry,
       practiceCity, practiceState, practiceZipCode, practicePhone,
       isExistingCustomer, agreedToTerms, subscribedToUpdates,
     } = req.body;
@@ -53,6 +53,10 @@ export async function register(req: Request, res: Response) {
       if (!practicePhoneValidation.isValid) {
         errors.push(practicePhoneValidation.error || "Invalid practice phone number format");
       }
+    }
+
+    if (role === Role.MED && (!practiceCountry || typeof practiceCountry !== "string" || !practiceCountry.trim())) {
+      errors.push("Practice country is required");
     }
 
     // Validate role if provided
@@ -100,6 +104,7 @@ export async function register(req: Request, res: Response) {
       practiceName,
       practiceAddressLine1,
       practiceAddressLine2,
+      practiceCountry,
       practiceCity,
       practiceState,
       practiceZipCode,

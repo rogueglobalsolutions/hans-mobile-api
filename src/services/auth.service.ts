@@ -27,6 +27,7 @@ interface RegisterInput {
   practiceName?: string;
   practiceAddressLine1?: string;
   practiceAddressLine2?: string;
+  practiceCountry?: string;
   practiceCity?: string;
   practiceState?: string;
   practiceZipCode?: string;
@@ -90,6 +91,7 @@ export async function register(input: RegisterInput) {
       practiceName: input.practiceName?.trim() || null,
       practiceAddressLine1: input.practiceAddressLine1?.trim() || null,
       practiceAddressLine2: input.practiceAddressLine2?.trim() || null,
+      practiceCountry: input.practiceCountry?.trim() || null,
       practiceCity: input.practiceCity?.trim() || null,
       practiceState: input.practiceState?.trim() || null,
       practiceZipCode: input.practiceZipCode?.trim() || null,
