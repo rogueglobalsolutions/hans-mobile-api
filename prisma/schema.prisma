@@ -102,6 +102,7 @@ model User {
   practiceName              String?
   practiceAddressLine1      String?
   practiceAddressLine2      String?
+  practiceCountry           String?
   practiceCity              String?
   practiceState             String?
   practiceZipCode           String?

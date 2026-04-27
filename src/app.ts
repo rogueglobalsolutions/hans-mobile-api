@@ -13,6 +13,7 @@ import appointmentRoutes from "./routes/appointment.routes";
 import baRoutes from "./routes/ba.routes";
 import salesRepRoutes from "./routes/salesRep.routes";
 import paymentRoutes from "./routes/payment.routes";
+import locationRoutes from "./routes/location.routes";
 import * as salesRepController from "./controllers/salesRep.controller";
 import { authenticateToken, requireRole } from "./middleware/auth";
 import { requestLogger } from "./middleware/requestLogger";
@@ -51,6 +52,7 @@ app.use("/api/ba", baRoutes);
 app.use("/api/sales-rep", salesRepRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/support", supportRoutes); 
+app.use("/api/locations", locationRoutes);
 
 // Public — list sales reps for registration dropdown (MED + ADMIN)
 app.get(
