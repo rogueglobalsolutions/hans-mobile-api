@@ -53,6 +53,7 @@ app.use("/api/sales-rep", salesRepRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/support", supportRoutes); 
 app.use("/api/locations", locationRoutes);
+app.use(express.static(path.join(process.cwd(), "public")));
 
 // Public — list sales reps for registration dropdown (MED + ADMIN)
 app.get(
