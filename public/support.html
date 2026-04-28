@@ -427,7 +427,7 @@
       const res = await fetch('/api/support/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userType, category, message })
+        body: JSON.stringify({ userType, category, message, email })
       });
 
       const data = await res.json();
