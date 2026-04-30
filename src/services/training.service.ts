@@ -1,10 +1,10 @@
 import prisma from "../config/prisma";
-import { stripe, TRAINING_LEVEL_STRIPE_PRICES, OBSERVER_PRICE_CENTS } from "../config/stripe";
+import { stripe, TRAINING_LEVEL_STRIPE_PRICES, OBSERVER_STRIPE_PRICE_ID } from "../config/stripe";
 import {
   TrainingType, TrainingBrand, TrainingLevel, CreditTransactionType,
   TrainingStatus, EnrollmentType, PaymentStatus,
 } from "../generated/prisma/enums";
-import { LearningFormat, TRAINING_LEVEL_PRICING } from "../utils/trainingEnums";
+import { LearningFormat } from "../utils/trainingEnums";
 import { sendTrainingCancellationEmail } from "./email.service";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -174,19 +174,39 @@ export async function initiateEnrollment(
   });
 
   let enrollmentType: EnrollmentType;
-  let amountUsd: number;
 
   if (enrolleeCount < training.maxEnrollees) {
     enrollmentType = EnrollmentType.ENROLLEE;
-    amountUsd = TRAINING_LEVEL_PRICING[training.level].price;
   } else if (observerCount < training.maxObservers) {
     enrollmentType = EnrollmentType.OBSERVER;
-    amountUsd = OBSERVER_PRICE_CENTS / 100;
   } else {
     throw new Error("Training is full");
   }
 
-  const amountCents = amountUsd * 100; // Stripe requires cents
+  const stripePriceId =
+    enrollmentType === EnrollmentType.OBSERVER
+      ? OBSERVER_STRIPE_PRICE_ID
+      : TRAINING_LEVEL_STRIPE_PRICES[training.level];
+  const stripePrice = await stripe.prices.retrieve(stripePriceId);
+
+  if (!stripePrice.active) {
+    throw new Error(`Stripe price is inactive: ${stripePriceId}`);
+  }
+
+  if (stripePrice.currency.toLowerCase() !== "usd") {
+    throw new Error(`Stripe price currency must be USD: ${stripePriceId}`);
+  }
+
+  if (stripePrice.type !== "one_time") {
+    throw new Error(`Stripe price must be one_time: ${stripePriceId}`);
+  }
+
+  if (stripePrice.unit_amount == null) {
+    throw new Error(`Stripe price unit_amount is missing: ${stripePriceId}`);
+  }
+
+  const amountCents = stripePrice.unit_amount;
+  const amountUsd = amountCents / 100;
 
   // Prerequisite check for advanced levels
   if (PREREQUISITE_LEVELS.has(training.level)) {
@@ -214,7 +234,7 @@ export async function initiateEnrollment(
   const paymentIntent = await stripe.paymentIntents.create({
     amount: amountCents,
     currency: "usd",
-    metadata: { trainingId, userId, enrollmentType },
+    metadata: { trainingId, userId, enrollmentType, stripePriceId },
     payment_method_types: ['card'], // add 'paypal' here later
   });
 
