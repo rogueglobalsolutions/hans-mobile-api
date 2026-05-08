@@ -20,13 +20,12 @@ const reps = [
   { fullName: "Jan",           email: "jan@hansapp.com" },
   { fullName: "Bridget",       email: "bridget@hansapp.com" },
   { fullName: "Aslaam",        email: "aslaam@hansapp.com" },
+  { fullName: "Hans Biomed Shops", email: "Hansbiomedshops@gmail.com", password: "medproaccess" },
 ];
 
 const DEFAULT_PASSWORD = "HansRep2025!";
 
 async function main() {
-  const hashed = await bcrypt.hash(DEFAULT_PASSWORD, 10);
-
   for (let i = 0; i < reps.length; i++) {
     const rep = reps[i];
     const existing = await prisma.user.findFirst({ where: { email: rep.email } });
@@ -36,6 +35,8 @@ async function main() {
     }
 
     const phone = `000000000${i + 1}`.slice(-10); // unique placeholder per rep
+    const password = "password" in rep && rep.password ? rep.password : DEFAULT_PASSWORD;
+    const hashed = await bcrypt.hash(password, 10);
 
     await prisma.user.create({
       data: {

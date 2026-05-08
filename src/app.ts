@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import http from "http";
-import dotenv from "dotenv";
+import "./config/env";
 import authRoutes from "./routes/auth.routes";
 import verificationRoutes from "./routes/verification.routes";
 import adminRoutes from "./routes/admin.routes";
@@ -20,8 +20,6 @@ import { requestLogger } from "./middleware/requestLogger";
 import { Role } from "./generated/prisma/enums";
 import { initSocket } from "./socket";
 import supportRoutes from "./routes/support.routes";
-
-dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
