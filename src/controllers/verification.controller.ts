@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import * as verificationService from "../services/verification.service";
+import { Role } from "../generated/prisma/enums";
 import { sanitizeError } from "../utils/errors";
 
 export async function submitVerification(req: Request, res: Response) {
@@ -63,6 +64,38 @@ export async function getMedUsers(req: Request, res: Response) {
     });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "getMedUsers") });
+  }
+}
+
+export async function getAllUsers(req: Request, res: Response) {
+  try {
+    const roleQuery = req.query.role;
+    let role: Role | undefined;
+
+    if (typeof roleQuery === "string" && roleQuery.trim()) {
+      const normalizedRole = roleQuery.trim().toUpperCase();
+      const validRoles = Object.values(Role);
+
+      if (!validRoles.includes(normalizedRole as Role)) {
+        res.status(400).json({
+          success: false,
+          message: `Invalid role filter. Allowed roles: ${validRoles.join(", ")}`,
+        });
+        return;
+      }
+
+      role = normalizedRole as Role;
+    }
+
+    const users = await verificationService.getAllUsers(role);
+
+    res.json({
+      success: true,
+      message: role ? `${role} users retrieved successfully` : "Users retrieved successfully",
+      data: users,
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: sanitizeError(error, "getAllUsers") });
   }
 }
 

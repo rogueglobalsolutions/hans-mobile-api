@@ -1,5 +1,5 @@
 import prisma from "../config/prisma";
-import { AccountStatus } from "../generated/prisma/enums";
+import { AccountStatus, Role } from "../generated/prisma/enums";
 import { sendVerificationStatusEmail } from "./email.service";
 
 interface SubmitVerificationInput {
@@ -150,6 +150,27 @@ export async function getMedUsers() {
     },
     orderBy: {
       createdAt: "asc",
+    },
+  });
+
+  return users;
+}
+
+export async function getAllUsers(role?: Role) {
+  const users = await prisma.user.findMany({
+    where: role ? { role } : undefined,
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+      phoneNumber: true,
+      role: true,
+      accountStatus: true,
+      hasSubmittedVerification: true,
+      createdAt: true,
+    },
+    orderBy: {
+      createdAt: "desc",
     },
   });
 

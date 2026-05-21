@@ -17,6 +17,7 @@ router.use(requireRole(Role.ADMIN));
 
 // ─── Verification management ──────────────────────────────────────────────────
 
+router.get("/users", verificationController.getAllUsers);
 router.get("/verifications", verificationController.getMedUsers);
 router.get("/verifications/pending", verificationController.getPendingVerifications);
 router.get("/verifications/:userId", verificationController.getMedUserById);
