@@ -48,6 +48,17 @@ const SAFE_MESSAGES: Record<string, string> = {
   "Folder not found": "Folder not found.",
   "Document not found": "Document not found.",
   "Parent folder not found": "Parent folder not found.",
+  // Commerce
+  "Product not found": "Product not found.",
+  "Order not found": "Order not found.",
+  "Shipping label not found": "Shipping label not found.",
+  "At least one product is required": "At least one product is required.",
+  "Product is out of stock": "Product is out of stock.",
+  "Product checkout is not configured": "Product checkout is not configured for this item yet.",
+  "No payment found for this order": "No payment found for this order.",
+  "Order is not refundable": "This order is not refundable.",
+  "Refund amount must be greater than zero": "Refund amount must be greater than zero.",
+  "Payment has not succeeded": "Payment has not succeeded.",
 };
 
 const FALLBACK_MESSAGES: Record<string, string> = {
@@ -105,6 +116,26 @@ const FALLBACK_MESSAGES: Record<string, string> = {
   uploadDocument: "Failed to upload document. Please try again.",
   deleteFolder: "Failed to delete folder. Please try again.",
   deleteDocument: "Failed to delete document. Please try again.",
+  // Commerce
+  getCommerceDashboard: "Failed to load commerce dashboard.",
+  getCommerceProducts: "Failed to load products.",
+  getCommerceProductById: "Failed to load product.",
+  updateCommerceProduct: "Failed to update product.",
+  getLowStockProducts: "Failed to load low stock products.",
+  getCommerceOrders: "Failed to load orders.",
+  getCommerceOrderById: "Failed to load order.",
+  updateCommerceOrder: "Failed to update order.",
+  refundCommerceOrder: "Failed to refund order.",
+  getCommerceCustomers: "Failed to load customers.",
+  getCommerceCustomerById: "Failed to load customer.",
+  getCommerceReports: "Failed to load commerce reports.",
+  getShippingLabels: "Failed to load shipping labels.",
+  getShippingLabelById: "Failed to load shipping label.",
+  createShippingLabel: "Failed to create shipping label.",
+  updateShippingLabel: "Failed to update shipping label.",
+  createProductOrderIntent: "Failed to create product payment intent.",
+  confirmProductOrderPayment: "Failed to confirm product order payment.",
+  getMyCommerceOrders: "Failed to load your orders.",
 };
 
 export function sanitizeError(error: unknown, operation: string): string {

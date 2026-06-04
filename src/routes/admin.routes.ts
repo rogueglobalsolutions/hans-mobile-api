@@ -5,6 +5,7 @@ import * as appointmentController from "../controllers/appointment.controller";
 import * as baController from "../controllers/ba.controller";
 import * as salesRepController from "../controllers/salesRep.controller";
 import * as trainingDocController from "../controllers/trainingDoc.controller";
+import * as commerceController from "../controllers/commerce.controller";
 import { authenticateToken, requireRole } from "../middleware/auth";
 import { Role } from "../generated/prisma/enums";
 import { uploadTrainingBg, uploadTrainingDocs } from "../middleware/upload";
@@ -67,5 +68,42 @@ router.get("/ba/stats", baController.getBAStats);
 // ─── Sales Rep management ─────────────────────────────────────────────────────
 
 router.post("/sales-reps", salesRepController.createSalesRep);
+
+// ─── Commerce management ──────────────────────────────────────────────────────
+
+router.get("/commerce/dashboard", commerceController.getAdminDashboard);
+
+router.get("/commerce/orders/recent", commerceController.getRecentOrders);
+router.get("/commerce/orders/counts", commerceController.getOrderCounts);
+router.get("/commerce/orders", commerceController.getAdminOrders);
+router.get("/commerce/orders/:id", commerceController.getAdminOrderById);
+router.patch("/commerce/orders/:id/status", commerceController.updateOrderStatus);
+router.patch("/commerce/orders/:id/tracking", commerceController.updateOrderTracking);
+router.post("/commerce/orders/:id/verify", commerceController.verifyOrder);
+router.post("/commerce/orders/:id/cancel", commerceController.cancelOrder);
+router.post("/commerce/orders/:id/refund", commerceController.refundOrder);
+router.post("/commerce/orders/:id/archive", commerceController.archiveOrder);
+router.post("/commerce/orders/:id/duplicate", commerceController.duplicateOrder);
+router.post("/commerce/orders/:id/shipping-labels", commerceController.createShippingLabel);
+
+router.get("/commerce/shipping-labels", commerceController.getShippingLabels);
+router.get("/commerce/shipping-labels/:id", commerceController.getShippingLabelById);
+router.patch("/commerce/shipping-labels/:id/printed", commerceController.markShippingLabelPrinted);
+router.post("/commerce/shipping-labels/:id/void", commerceController.voidShippingLabel);
+
+router.get("/commerce/products/low-stock", commerceController.getLowStockProducts);
+router.get("/commerce/products", commerceController.getAdminProducts);
+router.get("/commerce/products/:id", commerceController.getProductById);
+router.patch("/commerce/products/:id", commerceController.updateProduct);
+router.patch("/commerce/products/:id/status", commerceController.updateProductStatus);
+router.patch("/commerce/products/:id/stock", commerceController.updateProductStock);
+
+router.get("/commerce/customers", commerceController.getCustomers);
+router.get("/commerce/customers/:id", commerceController.getCustomerById);
+
+router.get("/commerce/reports/revenue", commerceController.getRevenueSummary);
+router.get("/commerce/reports/sales", commerceController.getSalesReport);
+router.get("/commerce/reports/orders-breakdown", commerceController.getOrdersBreakdown);
+router.get("/commerce/reports/top-products", commerceController.getTopProducts);
 
 export default router;

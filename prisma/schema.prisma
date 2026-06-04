@@ -65,6 +65,71 @@ enum CreditTransactionType {
   SPENT  // Credit deducted — e.g. store purchase
 }
 
+enum ProductStatus {
+  ACTIVE
+  HIDDEN
+}
+
+enum CommerceOrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum CommercePaymentStatus {
+  PENDING
+  PAID
+  PARTIALLY_REFUNDED
+  REFUNDED
+  FAILED
+}
+
+enum OrderVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum FulfillmentStatus {
+  UNFULFILLED
+  PARTIALLY_FULFILLED
+  FULFILLED
+}
+
+enum DeliveryStatus {
+  NOT_APPLICABLE
+  LABEL_CREATED
+  IN_TRANSIT
+  DELIVERED
+  RETURNED
+}
+
+enum ShippingMethod {
+  GROUND
+  FREE_GROUND
+  NEXT_DAY_AIR
+  FREE_NEXT_DAY_AIR
+  UPS_WORLDWIDE_SAVER
+  MANUAL
+  OTHER
+}
+
+enum ShippingLabelStatus {
+  PENDING
+  CREATED
+  PRINTED
+  VOIDED
+  FAILED
+}
+
+enum OrderRefundStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
 enum AppointmentStatus {
   PENDING
   APPROVED
@@ -123,6 +188,12 @@ model User {
   baEntries                 BeforeAndAfterEntry[]  @relation("UserBAEntries")
   contestEntries            ContestEntry[]         @relation("UserContestEntries")
   contestLikes              ContestLike[]          @relation("AdminContestLikes")
+  commerceOrders            Order[]                @relation("CommerceCustomerOrders")
+  verifiedCommerceOrders    Order[]                @relation("CommerceOrderVerifier")
+  commerceStatusUpdates     OrderStatusHistory[]   @relation("CommerceStatusUpdatedBy")
+  commerceRefundRequests    OrderRefund[]          @relation("CommerceRefundRequester")
+  shippingLabelRequests     ShippingLabel[]        @relation("ShippingLabelRequester")
+  stockAdjustments          StockAuditLog[]        @relation("StockAdjustedBy")
 }
 
 model Otp {
@@ -194,6 +265,234 @@ model CreditTransaction {
   description String                // Human-readable e.g. "Enrolled in Advanced PDO Thread Techniques"
   referenceId String?               // Optional — trainingId, orderId, etc.
   createdAt   DateTime              @default(now())
+}
+
+model Product {
+  id                   String           @id @default(uuid())
+  sku                  String?          @unique
+  name                 String
+  slug                 String           @unique
+  description          String
+  category             String?
+  vendor               String?
+  priceCents           Int?
+  compareAtPriceCents  Int?
+  currency             String           @default("USD")
+  stockQty             Int              @default(0)
+  lowStockThreshold    Int              @default(5)
+  status               ProductStatus    @default(HIDDEN)
+  imageUrl             String?
+  assetPath            String?
+  shippingInfo         String?
+  returnAndExchange    String?
+  shelfLife            String?
+  disclaimer           String?
+  usedWith             String?
+  fdaCleared           Boolean          @default(false)
+  securePackaging      Boolean          @default(false)
+  groundShippingOnly   Boolean          @default(false)
+  stripeProductId      String?
+  stripeDefaultPriceId String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  variants             ProductVariant[]
+  images               ProductImage[]
+  orderItems           OrderItem[]
+  stockAuditLogs       StockAuditLog[]
+
+  @@index([status])
+  @@index([vendor])
+  @@index([category])
+  @@index([createdAt])
+}
+
+model ProductVariant {
+  id            String      @id @default(uuid())
+  productId     String
+  product       Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  label         String
+  sku           String?     @unique
+  priceCents    Int?
+  stockQty      Int?
+  stripePriceId String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  orderItems    OrderItem[]
+
+  @@index([productId])
+}
+
+model ProductImage {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String?
+  assetPath String?
+  altText   String?
+  sortOrder Int     @default(0)
+
+  @@index([productId])
+}
+
+model Order {
+  id                    String                  @id @default(uuid())
+  orderNumber           String                  @unique
+  userId                String?
+  user                  User?                   @relation("CommerceCustomerOrders", fields: [userId], references: [id], onDelete: SetNull)
+  customerName          String
+  customerEmail         String
+  customerPhone         String?
+  shippingAddress1      String?
+  shippingAddress2      String?
+  shippingCity          String?
+  shippingState         String?
+  shippingZipCode       String?
+  shippingCountry       String?
+  subtotalCents         Int
+  shippingFeeCents      Int                     @default(0)
+  taxCents              Int                     @default(0)
+  totalAmountCents      Int
+  currency              String                  @default("USD")
+  status                CommerceOrderStatus     @default(PENDING)
+  paymentStatus         CommercePaymentStatus   @default(PENDING)
+  verificationStatus    OrderVerificationStatus @default(PENDING)
+  fulfillmentStatus     FulfillmentStatus       @default(UNFULFILLED)
+  deliveryStatus        DeliveryStatus          @default(NOT_APPLICABLE)
+  shippingMethod        ShippingMethod?
+  trackingNumber        String?
+  courierName           String?
+  trackingUrl           String?
+  notes                 String?
+  cancellationReason    String?
+  cancellationNote      String?
+  stripePaymentIntentId String?                 @unique
+  stripeCheckoutId      String?
+  paidAt                DateTime?
+  verifiedAt            DateTime?
+  verifiedById          String?
+  verifiedBy            User?                   @relation("CommerceOrderVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
+  cancelledAt           DateTime?
+  refundedAt            DateTime?
+  shippedAt             DateTime?
+  deliveredAt           DateTime?
+  archivedAt            DateTime?
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  items                 OrderItem[]
+  statusHistory         OrderStatusHistory[]
+  refunds               OrderRefund[]
+  shippingLabels        ShippingLabel[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([paymentStatus])
+  @@index([verificationStatus])
+  @@index([createdAt])
+  @@index([archivedAt])
+}
+
+model OrderItem {
+  id             String          @id @default(uuid())
+  orderId        String
+  order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId      String?
+  product        Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
+  variantId      String?
+  variant        ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  productName    String
+  variantLabel   String?
+  sku            String?
+  quantity       Int
+  unitPriceCents Int
+  lineTotalCents Int
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([variantId])
+}
+
+model OrderStatusHistory {
+  id                 String                   @id @default(uuid())
+  orderId            String
+  order              Order                    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status             CommerceOrderStatus?
+  paymentStatus      CommercePaymentStatus?
+  fulfillmentStatus  FulfillmentStatus?
+  deliveryStatus     DeliveryStatus?
+  verificationStatus OrderVerificationStatus?
+  action             String?
+  note               String?
+  updatedById        String?
+  updatedBy          User?                    @relation("CommerceStatusUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt          DateTime                 @default(now())
+
+  @@index([orderId])
+  @@index([updatedById])
+  @@index([createdAt])
+}
+
+model OrderRefund {
+  id             String            @id @default(uuid())
+  orderId        String
+  order          Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amountCents    Int
+  currency       String            @default("USD")
+  reason         String?
+  status         OrderRefundStatus @default(PENDING)
+  stripeRefundId String?
+  requestedById  String?
+  requestedBy    User?             @relation("CommerceRefundRequester", fields: [requestedById], references: [id], onDelete: SetNull)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([orderId])
+  @@index([requestedById])
+}
+
+model ShippingLabel {
+  id             String              @id @default(uuid())
+  orderId        String
+  order          Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status         ShippingLabelStatus @default(PENDING)
+  shippingMethod ShippingMethod?
+  carrier        String              @default("UPS")
+  serviceCode    String?
+  trackingNumber String?
+  trackingUrl    String?
+  labelUrl       String?
+  labelFormat    String?
+  shipmentId     String?
+  rateId         String?
+  costCents      Int?
+  currency       String              @default("USD")
+  requestedById  String?
+  requestedBy    User?               @relation("ShippingLabelRequester", fields: [requestedById], references: [id], onDelete: SetNull)
+  printedAt      DateTime?
+  voidedAt       DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([orderId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model StockAuditLog {
+  id               String   @id @default(uuid())
+  productId        String
+  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId        String?
+  previousStockQty Int
+  newStockQty      Int
+  delta            Int
+  note             String?
+  adjustedById     String?
+  adjustedBy       User?    @relation("StockAdjustedBy", fields: [adjustedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now())
+
+  @@index([productId])
+  @@index([adjustedById])
+  @@index([createdAt])
 }
 
 model Appointment {
