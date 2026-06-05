@@ -29,14 +29,21 @@ router.post("/verifications/:userId/reject", verificationController.rejectVerifi
 
 router.post(
   "/trainings",
-  uploadTrainingBg.fields([{ name: "backgroundImage", maxCount: 1 }]),
+  uploadTrainingBg.fields([
+    { name: "backgroundImage", maxCount: 1 },
+    { name: "speakerImage", maxCount: 1 },
+  ]),
   trainingController.createTraining,
 );
 router.patch(
   "/trainings/:id",
-  uploadTrainingBg.fields([{ name: "backgroundImage", maxCount: 1 }]),
+  uploadTrainingBg.fields([
+    { name: "backgroundImage", maxCount: 1 },
+    { name: "speakerImage", maxCount: 1 },
+  ]),
   trainingController.updateTraining,
 );
+router.delete("/trainings/:id", trainingController.deleteTraining);
 router.post("/trainings/:id/cancel", trainingController.cancelTraining);
 router.get("/trainings/:id/enrollees", trainingController.getTrainingEnrollees);
 

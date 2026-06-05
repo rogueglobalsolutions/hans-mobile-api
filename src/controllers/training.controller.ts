@@ -130,6 +130,9 @@ export async function createTraining(req: Request, res: Response) {
     const backgroundImagePath = files?.backgroundImage?.[0]
       ? `uploads/trainings-bg-img/${files.backgroundImage[0].filename}`
       : undefined;
+    const speakerImagePath = files?.speakerImage?.[0]
+      ? `uploads/trainings-speaker-img/${files.speakerImage[0].filename}`
+      : undefined;
 
     const adminId = (req as any).userId as string;
 
@@ -144,6 +147,7 @@ export async function createTraining(req: Request, res: Response) {
       title:           title.trim(),
       speaker:         speaker.trim(),
       speakerIntro:    speakerIntro.trim(),
+      speakerImagePath,
       productsUsed:    productsUsed?.trim() || undefined,
       areasCovered:    areasCovered.trim(),
       description:     description.trim(),
@@ -276,6 +280,9 @@ export async function updateTraining(req: Request, res: Response) {
     const backgroundImagePath = files?.backgroundImage?.[0]
       ? `uploads/trainings-bg-img/${files.backgroundImage[0].filename}`
       : undefined;
+    const speakerImagePath = files?.speakerImage?.[0]
+      ? `uploads/trainings-speaker-img/${files.speakerImage[0].filename}`
+      : undefined;
 
     const training = await trainingService.updateTraining(trainingId, {
       ...(type             !== undefined && { type }),
@@ -285,6 +292,7 @@ export async function updateTraining(req: Request, res: Response) {
       ...(title?.trim()    && { title: title.trim() }),
       ...(speaker?.trim()  && { speaker: speaker.trim() }),
       ...(speakerIntro?.trim() && { speakerIntro: speakerIntro.trim() }),
+      ...(speakerImagePath && { speakerImagePath }),
       ...(areasCovered?.trim() && { areasCovered: areasCovered.trim() }),
       ...(description?.trim()  && { description: description.trim() }),
       ...(location?.trim()     && { location: location.trim() }),
@@ -301,6 +309,9 @@ export async function updateTraining(req: Request, res: Response) {
   } catch (err: any) {
     if (err.message === "Training not found") {
       return res.status(404).json({ success: false, message: "Training not found" });
+    }
+    if (err.message?.includes("cannot be edited")) {
+      return res.status(409).json({ success: false, message: err.message });
     }
     console.error("[updateTraining]", err);
     return res.status(500).json({ success: false, message: "Failed to update training" });
@@ -352,6 +363,29 @@ export async function getTrainingById(req: Request, res: Response) {
     }
     console.error("[getTrainingById]", err);
     return res.status(500).json({ success: false, message: "Failed to retrieve training" });
+  }
+}
+
+// ─── Admin: Delete Training ───────────────────────────────────────────────────
+
+/**
+ * DELETE /api/admin/trainings/:id
+ * Permanently delete an unenrolled training.
+ */
+export async function deleteTraining(req: Request, res: Response) {
+  try {
+    const trainingId = req.params.id as string;
+    const result = await trainingService.deleteTraining(trainingId);
+    return res.json({ success: true, message: result.message });
+  } catch (err: any) {
+    if (err.message === "Training not found") {
+      return res.status(404).json({ success: false, message: "Training not found" });
+    }
+    if (err.message?.includes("cannot be deleted")) {
+      return res.status(409).json({ success: false, message: err.message });
+    }
+    console.error("[deleteTraining]", err);
+    return res.status(500).json({ success: false, message: "Failed to delete training" });
   }
 }
 

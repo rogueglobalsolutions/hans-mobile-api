@@ -18,6 +18,7 @@ export interface CreateTrainingInput {
   title: string;
   speaker: string;
   speakerIntro: string;
+  speakerImagePath?: string;
   productsUsed?: string;
   areasCovered: string;
   description: string;
@@ -52,6 +53,7 @@ export async function createTraining(input: CreateTrainingInput) {
       title:               input.title,
       speaker:             input.speaker,
       speakerIntro:        input.speakerIntro,
+      speakerImagePath:     input.speakerImagePath ?? null,
       productsUsed:        input.productsUsed ?? null,
       areasCovered:        input.areasCovered,
       description:         input.description,
@@ -75,6 +77,7 @@ export interface UpdateTrainingInput {
   title?: string;
   speaker?: string;
   speakerIntro?: string;
+  speakerImagePath?: string;
   productsUsed?: string | null;
   areasCovered?: string;
   description?: string;
@@ -86,8 +89,14 @@ export interface UpdateTrainingInput {
 }
 
 export async function updateTraining(trainingId: string, input: UpdateTrainingInput) {
-  const training = await prisma.training.findUnique({ where: { id: trainingId } });
+  const training = await prisma.training.findUnique({
+    where: { id: trainingId },
+    include: { _count: { select: { enrollments: true } } },
+  });
   if (!training) throw new Error("Training not found");
+  if (training._count.enrollments > 0) {
+    throw new Error("Training cannot be edited once it has students.");
+  }
 
   // Auto-update price and creditScore if level changed
   let price = input.price;
@@ -108,6 +117,7 @@ export async function updateTraining(trainingId: string, input: UpdateTrainingIn
       ...(input.title           !== undefined && { title: input.title }),
       ...(input.speaker         !== undefined && { speaker: input.speaker }),
       ...(input.speakerIntro    !== undefined && { speakerIntro: input.speakerIntro }),
+      ...(input.speakerImagePath !== undefined && { speakerImagePath: input.speakerImagePath }),
       ...(input.areasCovered    !== undefined && { areasCovered: input.areasCovered }),
       ...(input.description     !== undefined && { description: input.description }),
       ...(input.location        !== undefined && { location: input.location }),
@@ -118,6 +128,24 @@ export async function updateTraining(trainingId: string, input: UpdateTrainingIn
       ...(creditScore           !== undefined && { creditScore }),
     },
   });
+}
+
+export async function deleteTraining(trainingId: string) {
+  const training = await prisma.training.findUnique({
+    where: { id: trainingId },
+    select: {
+      id: true,
+      _count: { select: { enrollments: true } },
+    },
+  });
+
+  if (!training) throw new Error("Training not found");
+  if (training._count.enrollments > 0) {
+    throw new Error("Training cannot be deleted once it has enrollments. Cancel it instead.");
+  }
+
+  await prisma.training.delete({ where: { id: trainingId } });
+  return { message: "Training deleted successfully" };
 }
 
 /**
@@ -134,6 +162,7 @@ export async function getTrainings() {
       learningFormats:     true,
       title:               true,
       speaker:             true,
+      speakerImagePath:    true,
       backgroundImagePath: true,
       location:            true,
       scheduledAt:         true,
@@ -160,6 +189,7 @@ export async function getTrainings() {
 export async function getTrainingById(trainingId: string, requestingUserId?: string) {
   const training = await prisma.training.findUnique({
     where: { id: trainingId },
+    include: { _count: { select: { enrollments: true } } },
   });
 
   if (!training) throw new Error("Training not found");

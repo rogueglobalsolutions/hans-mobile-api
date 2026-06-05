@@ -215,6 +215,7 @@ model Training {
   title               String
   speaker             String
   speakerIntro        String
+  speakerImagePath    String?
   productsUsed        String?
   areasCovered        String
   description         String

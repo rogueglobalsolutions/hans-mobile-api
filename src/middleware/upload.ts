@@ -39,21 +39,28 @@ export const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
 });
 
-// ─── Training background images ──────────────────────────────────────────────
+// ─── Training images ─────────────────────────────────────────────────────────
 
 const trainingsBgDir = path.join(process.cwd(), "uploads", "trainings-bg-img");
 if (!fs.existsSync(trainingsBgDir)) {
   fs.mkdirSync(trainingsBgDir, { recursive: true });
 }
 
+const trainingsSpeakerDir = path.join(process.cwd(), "uploads", "trainings-speaker-img");
+if (!fs.existsSync(trainingsSpeakerDir)) {
+  fs.mkdirSync(trainingsSpeakerDir, { recursive: true });
+}
+
 const trainingBgStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    cb(null, trainingsBgDir);
+  destination: (_req, file, cb) => {
+    cb(null, file.fieldname === "speakerImage" ? trainingsSpeakerDir : trainingsBgDir);
   },
   filename: (_req, file, cb) => {
     const timestamp = Date.now();
     const ext = path.extname(file.originalname);
-    cb(null, `training_${timestamp}${ext}`);
+    const prefix = file.fieldname === "speakerImage" ? "speaker" : "training";
+    const suffix = Math.random().toString(36).slice(2, 6);
+    cb(null, `${prefix}_${timestamp}_${suffix}${ext}`);
   },
 });
 
