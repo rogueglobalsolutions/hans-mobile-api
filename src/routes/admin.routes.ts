@@ -32,6 +32,11 @@ router.post(
   uploadTrainingBg.fields([{ name: "backgroundImage", maxCount: 1 }]),
   trainingController.createTraining,
 );
+router.patch(
+  "/trainings/:id",
+  uploadTrainingBg.fields([{ name: "backgroundImage", maxCount: 1 }]),
+  trainingController.updateTraining,
+);
 router.post("/trainings/:id/cancel", trainingController.cancelTraining);
 router.get("/trainings/:id/enrollees", trainingController.getTrainingEnrollees);
 

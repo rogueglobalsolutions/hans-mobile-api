@@ -166,6 +166,147 @@ export async function createTraining(req: Request, res: Response) {
   }
 }
 
+// ─── ADD THIS to training.controller.ts ──────────────────────────────────────
+// Place after the createTraining() controller
+
+// ─── Admin: Update Training ───────────────────────────────────────────────────
+
+/**
+ * PATCH /api/admin/trainings/:id
+ * Updates an existing training session. Admin only.
+ * All fields are optional — only provided fields are updated.
+ */
+export async function updateTraining(req: Request, res: Response) {
+  try {
+    const trainingId = req.params.id as string;
+
+    const {
+      type: typeLabel,
+      brand: brandLabel,
+      level: levelLabel,
+      learningFormats: learningFormatLabels,
+      title,
+      speaker,
+      speakerIntro,
+      productsUsed,
+      areasCovered,
+      description,
+      location,
+      scheduledAt: scheduledAtRaw,
+    } = req.body;
+
+    const errors: string[] = [];
+
+    // ── Enum parsing (only if provided) ────────────────────────────────────────
+
+    let type: TrainingType | undefined;
+    if (typeLabel !== undefined) {
+      type = TRAINING_TYPE_FROM_LABEL[typeLabel];
+      if (!type) {
+        errors.push(`Invalid type "${typeLabel}". Must be one of: ${Object.keys(TRAINING_TYPE_FROM_LABEL).join(", ")}`);
+      }
+    }
+
+    let brand: TrainingBrand | undefined;
+    if (brandLabel !== undefined) {
+      brand = TRAINING_BRAND_FROM_LABEL[brandLabel];
+      if (!brand) {
+        errors.push(`Invalid brand "${brandLabel}". Must be one of: ${Object.keys(TRAINING_BRAND_FROM_LABEL).join(", ")}`);
+      }
+    }
+
+    let level: TrainingLevel | undefined;
+    if (levelLabel !== undefined) {
+      level = TRAINING_LEVEL_FROM_LABEL[levelLabel];
+      if (!level) {
+        errors.push(`Invalid level "${levelLabel}". Must be one of: ${Object.keys(TRAINING_LEVEL_FROM_LABEL).join(", ")}`);
+      }
+    }
+
+    // ── learningFormats (optional, JSON-stringified from multipart) ────────────
+
+    let learningFormats: LearningFormat[] | undefined;
+    if (learningFormatLabels !== undefined) {
+      let parsedLabels: string[] = [];
+      if (typeof learningFormatLabels === "string") {
+        try {
+          const parsed = JSON.parse(learningFormatLabels);
+          if (Array.isArray(parsed)) parsedLabels = parsed;
+        } catch {
+          // leave empty — will fail validation below
+        }
+      } else if (Array.isArray(learningFormatLabels)) {
+        parsedLabels = learningFormatLabels;
+      }
+
+      if (parsedLabels.length === 0) {
+        errors.push("learningFormats must be a non-empty array");
+      } else {
+        const parsed = learningFormatsFromLabels(parsedLabels);
+        if (!parsed) {
+          errors.push("Invalid learningFormats. Each value must be one of: Demo, Didactic, Discussion");
+        } else {
+          learningFormats = parsed;
+        }
+      }
+    }
+
+    // ── scheduledAt (optional) ─────────────────────────────────────────────────
+
+    let scheduledAt: Date | null | undefined;
+    if (scheduledAtRaw !== undefined) {
+      if (scheduledAtRaw === null || scheduledAtRaw === "") {
+        scheduledAt = null;
+      } else {
+        scheduledAt = new Date(scheduledAtRaw);
+        if (isNaN(scheduledAt.getTime())) {
+          errors.push("scheduledAt must be a valid ISO 8601 date string");
+          scheduledAt = undefined;
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      return res.status(400).json({ success: false, message: "Validation failed", errors });
+    }
+
+    // ── Background image (optional) ────────────────────────────────────────────
+
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+    const backgroundImagePath = files?.backgroundImage?.[0]
+      ? `uploads/trainings-bg-img/${files.backgroundImage[0].filename}`
+      : undefined;
+
+    const training = await trainingService.updateTraining(trainingId, {
+      ...(type             !== undefined && { type }),
+      ...(brand            !== undefined && { brand }),
+      ...(level            !== undefined && { level }),
+      ...(learningFormats  !== undefined && { learningFormats }),
+      ...(title?.trim()    && { title: title.trim() }),
+      ...(speaker?.trim()  && { speaker: speaker.trim() }),
+      ...(speakerIntro?.trim() && { speakerIntro: speakerIntro.trim() }),
+      ...(areasCovered?.trim() && { areasCovered: areasCovered.trim() }),
+      ...(description?.trim()  && { description: description.trim() }),
+      ...(location?.trim()     && { location: location.trim() }),
+      ...(productsUsed !== undefined && { productsUsed: productsUsed?.trim() || null }),
+      ...(scheduledAt  !== undefined && { scheduledAt }),
+      ...(backgroundImagePath  && { backgroundImagePath }),
+    });
+
+    return res.json({
+      success: true,
+      message: "Training updated successfully",
+      data:    formatTrainingResponse(training),
+    });
+  } catch (err: any) {
+    if (err.message === "Training not found") {
+      return res.status(404).json({ success: false, message: "Training not found" });
+    }
+    console.error("[updateTraining]", err);
+    return res.status(500).json({ success: false, message: "Failed to update training" });
+  }
+}
+
 // ─── MED: List Trainings ──────────────────────────────────────────────────────
 
 /**

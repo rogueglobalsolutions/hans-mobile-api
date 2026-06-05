@@ -6,6 +6,7 @@ import {
 } from "../generated/prisma/enums";
 import { LearningFormat } from "../utils/trainingEnums";
 import { sendTrainingCancellationEmail } from "./email.service";
+import { TRAINING_LEVEL_PRICING } from "../utils/trainingEnums";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,61 @@ export async function createTraining(input: CreateTrainingInput) {
       price:               input.price,
       creditScore:         input.creditScore,
       createdBy:           input.createdBy,
+    },
+  });
+}
+// ─── ADD THIS to training.service.ts ─────────────────────────────────────────
+// Place after the createTraining() function
+
+export interface UpdateTrainingInput {
+  type?: TrainingType;
+  brand?: TrainingBrand;
+  level?: TrainingLevel;
+  learningFormats?: LearningFormat[];
+  title?: string;
+  speaker?: string;
+  speakerIntro?: string;
+  productsUsed?: string | null;
+  areasCovered?: string;
+  description?: string;
+  backgroundImagePath?: string;
+  location?: string;
+  scheduledAt?: Date | null;
+  price?: number;
+  creditScore?: number;
+}
+
+export async function updateTraining(trainingId: string, input: UpdateTrainingInput) {
+  const training = await prisma.training.findUnique({ where: { id: trainingId } });
+  if (!training) throw new Error("Training not found");
+
+  // Auto-update price and creditScore if level changed
+  let price = input.price;
+  let creditScore = input.creditScore;
+  if (input.level && input.level !== training.level) {
+    const pricing = TRAINING_LEVEL_PRICING[input.level];
+    price = pricing.price;
+    creditScore = pricing.creditScore;
+  }
+
+  return prisma.training.update({
+    where: { id: trainingId },
+    data: {
+      ...(input.type            !== undefined && { type: input.type }),
+      ...(input.brand           !== undefined && { brand: input.brand }),
+      ...(input.level           !== undefined && { level: input.level }),
+      ...(input.learningFormats !== undefined && { learningFormats: input.learningFormats }),
+      ...(input.title           !== undefined && { title: input.title }),
+      ...(input.speaker         !== undefined && { speaker: input.speaker }),
+      ...(input.speakerIntro    !== undefined && { speakerIntro: input.speakerIntro }),
+      ...(input.areasCovered    !== undefined && { areasCovered: input.areasCovered }),
+      ...(input.description     !== undefined && { description: input.description }),
+      ...(input.location        !== undefined && { location: input.location }),
+      ...(input.scheduledAt     !== undefined && { scheduledAt: input.scheduledAt }),
+      ...(input.backgroundImagePath !== undefined && { backgroundImagePath: input.backgroundImagePath }),
+      ...(input.productsUsed    !== undefined && { productsUsed: input.productsUsed }),
+      ...(price                 !== undefined && { price }),
+      ...(creditScore           !== undefined && { creditScore }),
     },
   });
 }
