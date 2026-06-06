@@ -70,3 +70,15 @@ export async function getAdConfig(req: Request, res: Response) {
     res.status(400).json({ success: false, message: sanitizeError(error, "getAdConfig") });
   }
 }
+
+// ─── Delete ad config ─────────────────────────────────────────────────────────
+
+export async function deleteAdConfig(req: Request, res: Response) {
+  try {
+    const id = req.params.id as string;
+    await adsService.deleteAdConfig(id);
+    res.status(200).json({ success: true, message: "Ad deleted successfully" });
+  } catch (error) {
+    res.status(400).json({ success: false, message: sanitizeError(error, "deleteAdConfig") });
+  }
+}

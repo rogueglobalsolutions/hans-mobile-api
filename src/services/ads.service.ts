@@ -63,3 +63,11 @@ export async function getAdConfig() {
   });
   return config;
 }
+
+// ─── Delete ───────────────────────────────────────────────────────────────────
+ 
+export async function deleteAdConfig(id: string) {
+  // Delete slides first (foreign key), then the config
+  await prisma.adSlide.deleteMany({ where: { adConfigId: id } });
+  await prisma.adConfig.delete({ where: { id } });
+}

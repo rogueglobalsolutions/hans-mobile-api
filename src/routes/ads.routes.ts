@@ -30,6 +30,12 @@ router.put(
   adsController.updateAdConfig,
 );
 
+router.delete(
+  "/popup/:id",
+  authenticateToken,
+  requireRole(Role.ADMIN),
+  adsController.deleteAdConfig,
+);
 // ─── Public / MED — fetch active ad config ───────────────────────────────────
 
 router.get("/popup", authenticateToken, adsController.getAdConfig);
