@@ -1,6 +1,9 @@
 import { Request, Response } from "express";
 import * as adsService from "../services/ads.service";
 import { sanitizeError } from "../utils/errors";
+import sharp from "sharp";
+import path from "path";
+import fs from "fs";
 
 // ─── Upload a single ad image ─────────────────────────────────────────────────
 
@@ -12,6 +15,19 @@ export async function uploadAdImage(req: Request, res: Response) {
       return;
     }
 
+    // Compress and overwrite the uploaded file using sharp
+    const outputPath = file.path; // same path, overwrite in place
+    const tempPath = file.path + "_tmp";
+
+    await sharp(file.path)
+      .resize({ width: 1080, withoutEnlargement: true }) // cap at 1080px wide
+      .jpeg({ quality: 60, progressive: true })          // convert to JPEG, 60% quality
+      .toFile(tempPath);
+
+    // Replace original with compressed version
+    fs.renameSync(tempPath, outputPath);
+
+    // Always return .jpg extension regardless of original
     const url = `uploads/ads/${file.filename}`;
     res.status(201).json({ success: true, url });
   } catch (error) {
