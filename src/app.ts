@@ -22,6 +22,7 @@ import { requestLogger } from "./middleware/requestLogger";
 import { Role } from "./generated/prisma/enums";
 import { initSocket } from "./socket";
 import supportRoutes from "./routes/support.routes";
+import adsRoutes from "./routes/ads.routes";
 
 const app = express();
 const server = http.createServer(app);
@@ -55,6 +56,7 @@ app.use("/api/products", productRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/support", supportRoutes); 
 app.use("/api/locations", locationRoutes);
+app.use("/api/ads", adsRoutes);
 app.use(express.static(path.join(process.cwd(), "public")));
 
 // Public — list sales reps for registration dropdown (MED + ADMIN)

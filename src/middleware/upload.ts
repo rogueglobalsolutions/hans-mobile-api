@@ -199,6 +199,30 @@ export const uploadTrainingDocs = multer({
   limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
 });
 
+// ─── Ad images ───────────────────────────────────────────────────────────────
+
+const adsDir = path.join(process.cwd(), "uploads", "ads");
+if (!fs.existsSync(adsDir)) {
+  fs.mkdirSync(adsDir, { recursive: true });
+}
+
+const adsStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, adsDir);
+  },
+  filename: (_req, file, cb) => {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    cb(null, `ad_${timestamp}_${Math.random().toString(36).slice(2, 6)}${ext}`);
+  },
+});
+
+export const uploadAdImage = multer({
+  storage: adsStorage,
+  fileFilter: imageFileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+});
+
 // ─── Chat images ──────────────────────────────────────────────────────────────
 
 const chatImagesDir = path.join(process.cwd(), "uploads", "chat");

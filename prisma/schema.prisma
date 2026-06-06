@@ -606,3 +606,25 @@ model ContestLike {
 
   @@unique([entryId, adminId])
 }
+
+// ─── Popup Ads ────────────────────────────────────────────────────────────────
+
+model AdConfig {
+  id              String     @id @default(uuid())
+  isActive        Boolean    @default(true)
+  intervalSeconds Int        @default(3)
+  slides          AdSlide[]
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}
+
+model AdSlide {
+  id          String    @id @default(uuid())
+  adConfigId  String
+  adConfig    AdConfig  @relation(fields: [adConfigId], references: [id], onDelete: Cascade)
+  imageUrl    String
+  redirectUrl String    @default("")
+  createdAt   DateTime  @default(now())
+
+  @@index([adConfigId])
+}
