@@ -13,7 +13,7 @@ export async function getConfig(req: Request, res: Response) {
 export async function createPaymentIntent(req: Request, res: Response) {
   try {
     const userId = (req as any).userId as string;
-    const { trainingId, salesRepId, subOptionIndex } = req.body;
+    const { trainingId, salesRepId, subOptionIndex, discountCode } = req.body;
     if (!trainingId) {
       res.status(400).json({ success: false, message: "trainingId is required" });
       return;
@@ -23,6 +23,7 @@ export async function createPaymentIntent(req: Request, res: Response) {
       trainingId,
       salesRepId,
       subOptionIndex !== undefined ? Number(subOptionIndex) : undefined,
+      discountCode || undefined,
     );
     res.json({ success: true, data: result });
   } catch (err) {

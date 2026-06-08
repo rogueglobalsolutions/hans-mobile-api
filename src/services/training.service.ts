@@ -243,6 +243,7 @@ export async function initiateEnrollment(
   trainingId: string,
   salesRepId?: string,
   subOptionIndex?: number,
+  discountCode?: string,
 ) {
   const training = await prisma.training.findUnique({ where: { id: trainingId } });
   if (!training) throw new Error("Training not found");
@@ -293,6 +294,24 @@ export async function initiateEnrollment(
     finalCreditScore = selected.creditScore;
   }
 
+  // ✅ Apply discount code if provided
+  if (discountCode && enrollmentType === EnrollmentType.ENROLLEE) {
+    const discount = await prisma.discountCode.findUnique({
+      where: { code: discountCode.toUpperCase() },
+    });
+    if (discount && discount.isActive &&
+      (!discount.expiresAt || new Date() < discount.expiresAt) &&
+      (discount.maxUses === null || discount.usedCount < discount.maxUses) &&
+      (discount.applicableTo === 'TRAINING' || discount.applicableTo === 'BOTH')
+    ) {
+      if (discount.type === 'FIXED') {
+        finalAmountCents = Math.max(0, finalAmountCents - discount.value * 100);
+      } else {
+        finalAmountCents = Math.max(0, Math.round(finalAmountCents * (1 - discount.value / 100)));
+      }
+    }
+  }
+
   const finalAmountUsd = finalAmountCents / 100;
 
   if (PREREQUISITE_LEVELS.has(training.level)) {
@@ -326,6 +345,7 @@ export async function initiateEnrollment(
       stripePriceId,
       subOptionIndex: subOptionIndex?.toString() ?? "",
       creditScore: finalCreditScore.toString(),
+      discountCode: discountCode ?? "",
     },
     payment_method_types: ['card'],
   });

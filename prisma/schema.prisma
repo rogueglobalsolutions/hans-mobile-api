@@ -629,3 +629,34 @@ model AdSlide {
 
   @@index([adConfigId])
 }
+
+// ─── Discount Codes ───────────────────────────────────────────────────────────
+
+enum DiscountType {
+  FIXED
+  PERCENTAGE
+}
+
+enum DiscountApplicableTo {
+  TRAINING
+  PRODUCTS
+  BOTH
+}
+
+model DiscountCode {
+  id            String               @id @default(uuid())
+  code          String               @unique
+  type          DiscountType
+  value         Float
+  applicableTo  DiscountApplicableTo @default(BOTH)
+  maxUses       Int?
+  usedCount     Int                  @default(0)
+  expiresAt     DateTime?
+  isActive      Boolean              @default(true)
+  createdBy     String
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@index([code])
+  @@index([isActive])
+}
