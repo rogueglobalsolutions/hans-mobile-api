@@ -224,6 +224,7 @@ model Training {
   scheduledAt         DateTime?       // When the training is scheduled
   price               Int             // USD — auto-populated from level at creation
   creditScore         Int             // In-house currency earned on enrollment — auto-populated from level
+  subOptions          Json?           // nullable — only for MINT_LIFT_GROUP_TRAINING
   status              TrainingStatus  @default(ACTIVE)
   maxEnrollees        Int             @default(4)
   maxObservers        Int             @default(2)

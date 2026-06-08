@@ -10,6 +10,8 @@ import { TRAINING_LEVEL_PRICING } from "../utils/trainingEnums";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+type SubOption = { label: string; price: number; creditScore: number };
+
 export interface CreateTrainingInput {
   type: TrainingType;
   brand: TrainingBrand;
@@ -28,6 +30,27 @@ export interface CreateTrainingInput {
   price: number;
   creditScore: number;
   createdBy: string;
+  subOptions?: SubOption[];
+}
+
+export interface UpdateTrainingInput {
+  type?: TrainingType;
+  brand?: TrainingBrand;
+  level?: TrainingLevel;
+  learningFormats?: LearningFormat[];
+  title?: string;
+  speaker?: string;
+  speakerIntro?: string;
+  speakerImagePath?: string;
+  productsUsed?: string | null;
+  areasCovered?: string;
+  description?: string;
+  backgroundImagePath?: string;
+  location?: string;
+  scheduledAt?: Date | null;
+  price?: number;
+  creditScore?: number;
+  subOptions?: SubOption[];
 }
 
 const PREREQUISITE_LEVELS = new Set<TrainingLevel>([
@@ -53,7 +76,7 @@ export async function createTraining(input: CreateTrainingInput) {
       title:               input.title,
       speaker:             input.speaker,
       speakerIntro:        input.speakerIntro,
-      speakerImagePath:     input.speakerImagePath ?? null,
+      speakerImagePath:    input.speakerImagePath ?? null,
       productsUsed:        input.productsUsed ?? null,
       areasCovered:        input.areasCovered,
       description:         input.description,
@@ -63,27 +86,9 @@ export async function createTraining(input: CreateTrainingInput) {
       price:               input.price,
       creditScore:         input.creditScore,
       createdBy:           input.createdBy,
+      subOptions:          input.subOptions ? JSON.parse(JSON.stringify(input.subOptions)) : undefined,
     },
   });
-}
-
-export interface UpdateTrainingInput {
-  type?: TrainingType;
-  brand?: TrainingBrand;
-  level?: TrainingLevel;
-  learningFormats?: LearningFormat[];
-  title?: string;
-  speaker?: string;
-  speakerIntro?: string;
-  speakerImagePath?: string;
-  productsUsed?: string | null;
-  areasCovered?: string;
-  description?: string;
-  backgroundImagePath?: string;
-  location?: string;
-  scheduledAt?: Date | null;
-  price?: number;
-  creditScore?: number;
 }
 
 export async function updateTraining(trainingId: string, input: UpdateTrainingInput) {
@@ -92,7 +97,6 @@ export async function updateTraining(trainingId: string, input: UpdateTrainingIn
   });
   if (!training) throw new Error("Training not found");
 
-  // ✅ Only count COMPLETED enrollments — PENDING/FAILED don't lock editing
   const completedCount = await prisma.enrollment.count({
     where: { trainingId, paymentStatus: PaymentStatus.COMPLETED },
   });
@@ -100,7 +104,6 @@ export async function updateTraining(trainingId: string, input: UpdateTrainingIn
     throw new Error("Training cannot be edited once it has students.");
   }
 
-  // Auto-update price and creditScore if level changed
   let price = input.price;
   let creditScore = input.creditScore;
   if (input.level && input.level !== training.level) {
@@ -112,22 +115,23 @@ export async function updateTraining(trainingId: string, input: UpdateTrainingIn
   return prisma.training.update({
     where: { id: trainingId },
     data: {
-      ...(input.type            !== undefined && { type: input.type }),
-      ...(input.brand           !== undefined && { brand: input.brand }),
-      ...(input.level           !== undefined && { level: input.level }),
-      ...(input.learningFormats !== undefined && { learningFormats: input.learningFormats }),
-      ...(input.title           !== undefined && { title: input.title }),
-      ...(input.speaker         !== undefined && { speaker: input.speaker }),
-      ...(input.speakerIntro    !== undefined && { speakerIntro: input.speakerIntro }),
-      ...(input.speakerImagePath !== undefined && { speakerImagePath: input.speakerImagePath }),
-      ...(input.areasCovered    !== undefined && { areasCovered: input.areasCovered }),
-      ...(input.description     !== undefined && { description: input.description }),
-      ...(input.location        !== undefined && { location: input.location }),
-      ...(input.scheduledAt     !== undefined && { scheduledAt: input.scheduledAt }),
+      ...(input.type                !== undefined && { type: input.type }),
+      ...(input.brand               !== undefined && { brand: input.brand }),
+      ...(input.level               !== undefined && { level: input.level }),
+      ...(input.learningFormats     !== undefined && { learningFormats: input.learningFormats }),
+      ...(input.title               !== undefined && { title: input.title }),
+      ...(input.speaker             !== undefined && { speaker: input.speaker }),
+      ...(input.speakerIntro        !== undefined && { speakerIntro: input.speakerIntro }),
+      ...(input.speakerImagePath    !== undefined && { speakerImagePath: input.speakerImagePath }),
+      ...(input.areasCovered        !== undefined && { areasCovered: input.areasCovered }),
+      ...(input.description         !== undefined && { description: input.description }),
+      ...(input.location            !== undefined && { location: input.location }),
+      ...(input.scheduledAt         !== undefined && { scheduledAt: input.scheduledAt }),
       ...(input.backgroundImagePath !== undefined && { backgroundImagePath: input.backgroundImagePath }),
-      ...(input.productsUsed    !== undefined && { productsUsed: input.productsUsed }),
-      ...(price                 !== undefined && { price }),
-      ...(creditScore           !== undefined && { creditScore }),
+      ...(input.productsUsed        !== undefined && { productsUsed: input.productsUsed }),
+      ...(price                     !== undefined && { price }),
+      ...(creditScore               !== undefined && { creditScore }),
+      ...(input.subOptions          !== undefined && { subOptions: input.subOptions ? JSON.parse(JSON.stringify(input.subOptions)) : undefined }),
     },
   });
 }
@@ -139,7 +143,6 @@ export async function deleteTraining(trainingId: string) {
   });
   if (!training) throw new Error("Training not found");
 
-  // ✅ Only count COMPLETED enrollments — PENDING/FAILED don't block deletion
   const completedCount = await prisma.enrollment.count({
     where: { trainingId, paymentStatus: PaymentStatus.COMPLETED },
   });
@@ -151,9 +154,6 @@ export async function deleteTraining(trainingId: string) {
   return { message: "Training deleted successfully" };
 }
 
-/**
- * List all ACTIVE trainings for MED users.
- */
 export async function getTrainings() {
   const trainings = await prisma.training.findMany({
     where: { status: TrainingStatus.ACTIVE },
@@ -176,6 +176,7 @@ export async function getTrainings() {
       observerPrice:       true,
       status:              true,
       createdAt:           true,
+      subOptions:          true,
       _count: {
         select: { enrollments: true },
       },
@@ -186,9 +187,6 @@ export async function getTrainings() {
   return trainings;
 }
 
-/**
- * Get full details of a single training including slot counts and enrollment status.
- */
 export async function getTrainingById(trainingId: string, requestingUserId?: string) {
   const training = await prisma.training.findUnique({
     where: { id: trainingId },
@@ -216,7 +214,6 @@ export async function getTrainingById(trainingId: string, requestingUserId?: str
     }
   }
 
-  // Prerequisite check (only relevant for advanced levels)
   let meetsPrerequisite = true;
   if (requestingUserId && PREREQUISITE_LEVELS.has(training.level as TrainingLevel)) {
     const hasPrereq = await prisma.enrollment.findFirst({
@@ -241,20 +238,16 @@ export async function getTrainingById(trainingId: string, requestingUserId?: str
   };
 }
 
-/**
- * Create a Stripe PaymentIntent and a pending Enrollment row.
- * Returns { clientSecret, enrollmentType, amountCents, paymentIntentId }.
- */
 export async function initiateEnrollment(
   userId: string,
   trainingId: string,
   salesRepId?: string,
+  subOptionIndex?: number,
 ) {
   const training = await prisma.training.findUnique({ where: { id: trainingId } });
   if (!training) throw new Error("Training not found");
   if (training.status !== TrainingStatus.ACTIVE) throw new Error("Training is not available for enrollment");
 
-  // Check slot availability — only count COMPLETED enrollments
   const enrolleeCount = await prisma.enrollment.count({
     where: { trainingId, type: EnrollmentType.ENROLLEE, paymentStatus: PaymentStatus.COMPLETED },
   });
@@ -263,7 +256,6 @@ export async function initiateEnrollment(
   });
 
   let enrollmentType: EnrollmentType;
-
   if (enrolleeCount < training.maxEnrollees) {
     enrollmentType = EnrollmentType.ENROLLEE;
   } else if (observerCount < training.maxObservers) {
@@ -283,10 +275,26 @@ export async function initiateEnrollment(
   if (stripePrice.type !== "one_time") throw new Error(`Stripe price must be one_time: ${stripePriceId}`);
   if (stripePrice.unit_amount == null) throw new Error(`Stripe price unit_amount is missing: ${stripePriceId}`);
 
-  const amountCents = stripePrice.unit_amount;
-  const amountUsd = amountCents / 100;
+  // ✅ Use subOption price/creditScore if selected, otherwise use default
+  const subOptions = training.subOptions as SubOption[] | null;
+  let finalAmountCents = stripePrice.unit_amount;
+  let finalCreditScore = training.creditScore;
 
-  // Prerequisite check for advanced levels
+  if (
+    enrollmentType === EnrollmentType.ENROLLEE &&
+    subOptions &&
+    subOptions.length > 0 &&
+    subOptionIndex !== undefined &&
+    subOptionIndex >= 0 &&
+    subOptionIndex < subOptions.length
+  ) {
+    const selected = subOptions[subOptionIndex];
+    finalAmountCents = selected.price * 100;
+    finalCreditScore = selected.creditScore;
+  }
+
+  const finalAmountUsd = finalAmountCents / 100;
+
   if (PREREQUISITE_LEVELS.has(training.level)) {
     const hasPrerequisite = await prisma.enrollment.findFirst({
       where: {
@@ -300,26 +308,29 @@ export async function initiateEnrollment(
     }
   }
 
-  // Check existing enrollment
   const existing = await prisma.enrollment.findUnique({
     where: { userId_trainingId: { userId, trainingId } },
   });
 
-  // Already paid — block
   if (existing && existing.paymentStatus === PaymentStatus.COMPLETED) {
     throw new Error("Already enrolled in this training");
   }
 
-  // Create Stripe PaymentIntent
   const paymentIntent = await stripe.paymentIntents.create({
-    amount: amountCents,
+    amount: finalAmountCents,
     currency: "usd",
-    metadata: { trainingId, userId, enrollmentType, stripePriceId },
+    metadata: {
+      trainingId,
+      userId,
+      enrollmentType,
+      stripePriceId,
+      subOptionIndex: subOptionIndex?.toString() ?? "",
+      creditScore: finalCreditScore.toString(),
+    },
     payment_method_types: ['card'],
   });
 
   if (existing) {
-    // ✅ Mark old PENDING/FAILED enrollment — update with new payment intent
     await prisma.enrollment.update({
       where: { userId_trainingId: { userId, trainingId } },
       data: {
@@ -327,7 +338,7 @@ export async function initiateEnrollment(
         salesRepId: salesRepId ?? null,
         paymentStatus: PaymentStatus.PENDING,
         stripePaymentIntentId: paymentIntent.id,
-        paidAmount: amountUsd,
+        paidAmount: finalAmountUsd,
       },
     });
   } else {
@@ -339,7 +350,7 @@ export async function initiateEnrollment(
         salesRepId: salesRepId ?? null,
         paymentStatus: PaymentStatus.PENDING,
         stripePaymentIntentId: paymentIntent.id,
-        paidAmount: amountUsd,
+        paidAmount: finalAmountUsd,
       },
     });
   }
@@ -348,14 +359,10 @@ export async function initiateEnrollment(
     clientSecret: paymentIntent.client_secret!,
     paymentIntentId: paymentIntent.id,
     enrollmentType,
-    amountUsd,
+    amountUsd: finalAmountUsd,
   };
 }
 
-/**
- * Confirm enrollment after successful Stripe payment.
- * Awards credits for ENROLLEE type.
- */
 export async function confirmEnrollmentPayment(paymentIntentId: string) {
   const enrollment = await prisma.enrollment.findFirst({
     where: { stripePaymentIntentId: paymentIntentId },
@@ -367,31 +374,36 @@ export async function confirmEnrollmentPayment(paymentIntentId: string) {
     return { message: "Already confirmed", alreadyConfirmed: true };
   }
 
+  // ✅ Use creditScore from paymentIntent metadata (set during initiateEnrollment)
+  const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  const creditScoreOverride = paymentIntent.metadata?.creditScore
+    ? parseInt(paymentIntent.metadata.creditScore, 10)
+    : null;
+  const creditScore = creditScoreOverride ?? enrollment.training.creditScore;
+
   await prisma.$transaction(async (tx) => {
     await tx.enrollment.update({
       where: { id: enrollment.id },
       data: { paymentStatus: PaymentStatus.COMPLETED, paidAt: new Date() },
     });
 
-    // Award credits only for regular enrollees (not observers)
-    if (enrollment.type === EnrollmentType.ENROLLEE && enrollment.training.creditScore > 0) {
+    if (enrollment.type === EnrollmentType.ENROLLEE && creditScore > 0) {
       await tx.creditTransaction.create({
         data: {
           userId:      enrollment.userId,
           type:        CreditTransactionType.EARNED,
-          amount:      enrollment.training.creditScore,
+          amount:      creditScore,
           description: `Enrolled in ${enrollment.training.title}`,
           referenceId: enrollment.trainingId,
         },
       });
       await tx.user.update({
         where: { id: enrollment.userId },
-        data:  { creditBalance: { increment: enrollment.training.creditScore } },
+        data:  { creditBalance: { increment: creditScore } },
       });
     }
   });
 
-  // Send enrollment confirmation email
   try {
     const { sendEnrollmentConfirmationEmail } = await import("./email.service");
     await sendEnrollmentConfirmationEmail({
@@ -413,9 +425,6 @@ export async function confirmEnrollmentPayment(paymentIntentId: string) {
   return { message: "Enrollment confirmed", alreadyConfirmed: false };
 }
 
-/**
- * Mark a PENDING enrollment as FAILED — called when user cancels payment.
- */
 export async function failEnrollment(paymentIntentId: string) {
   const enrollment = await prisma.enrollment.findFirst({
     where: {
@@ -423,17 +432,13 @@ export async function failEnrollment(paymentIntentId: string) {
       paymentStatus: PaymentStatus.PENDING,
     },
   });
-  if (!enrollment) return; // Already completed or doesn't exist — ignore
+  if (!enrollment) return;
   await prisma.enrollment.update({
     where: { id: enrollment.id },
     data: { paymentStatus: PaymentStatus.FAILED },
   });
 }
 
-/**
- * Cancel a training with exactly 1 paid enrollee (non-observer).
- * Issues a full Stripe refund and sends cancellation email.
- */
 export async function cancelTraining(trainingId: string, adminId: string) {
   const training = await prisma.training.findUnique({ where: { id: trainingId } });
   if (!training) throw new Error("Training not found");
@@ -482,9 +487,6 @@ export async function cancelTraining(trainingId: string, adminId: string) {
   return { message: "Training cancelled and refund issued" };
 }
 
-/**
- * Get all completed-payment enrollees for an admin-viewed training.
- */
 export async function getTrainingEnrollees(trainingId: string) {
   return prisma.enrollment.findMany({
     where: { trainingId, paymentStatus: PaymentStatus.COMPLETED },
