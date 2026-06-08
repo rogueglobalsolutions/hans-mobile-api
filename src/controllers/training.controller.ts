@@ -14,11 +14,12 @@ import {
 } from "../utils/trainingEnums";
 import { TrainingType, TrainingBrand, TrainingLevel } from "../generated/prisma/enums";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type SubOption = { label: string; price: number; creditScore: number };
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Map a Training DB record's enum fields back to display labels for the response.
- */
 function formatTrainingResponse(training: any) {
   const learningFormats = Array.isArray(training.learningFormats)
     ? learningFormatsToLabels(training.learningFormats as LearningFormat[])
@@ -33,12 +34,23 @@ function formatTrainingResponse(training: any) {
   };
 }
 
+function parseSubOptions(raw: any, errors: string[]): SubOption[] | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!Array.isArray(parsed)) {
+      errors.push("subOptions must be a JSON array");
+      return undefined;
+    }
+    return parsed as SubOption[];
+  } catch {
+    errors.push("subOptions must be valid JSON");
+    return undefined;
+  }
+}
+
 // ─── Admin: Create Training ───────────────────────────────────────────────────
 
-/**
- * POST /api/admin/trainings
- * Creates a new training session. Admin only.
- */
 export async function createTraining(req: Request, res: Response) {
   try {
     const {
@@ -54,23 +66,24 @@ export async function createTraining(req: Request, res: Response) {
       description,
       location,
       scheduledAt: scheduledAtRaw,
+      subOptions: subOptionsRaw,
     } = req.body;
 
     const errors: string[] = [];
 
     // Required field validation
-    if (!typeLabel)        errors.push("type is required");
-    if (!brandLabel)       errors.push("brand is required");
-    if (!levelLabel)       errors.push("level is required");
-    if (!title?.trim())    errors.push("title is required");
-    if (!speaker?.trim())  errors.push("speaker is required");
+    if (!typeLabel)            errors.push("type is required");
+    if (!brandLabel)           errors.push("brand is required");
+    if (!levelLabel)           errors.push("level is required");
+    if (!title?.trim())        errors.push("title is required");
+    if (!speaker?.trim())      errors.push("speaker is required");
     if (!speakerIntro?.trim()) errors.push("speakerIntro is required");
     if (!areasCovered?.trim()) errors.push("areasCovered is required");
     if (!description?.trim())  errors.push("description is required");
     if (!location?.trim())     errors.push("location is required");
     if (!scheduledAtRaw)       errors.push("scheduledAt is required");
 
-    // Parse and validate scheduledAt
+    // Parse scheduledAt
     let scheduledAt: Date | undefined;
     if (scheduledAtRaw) {
       scheduledAt = new Date(scheduledAtRaw);
@@ -96,36 +109,36 @@ export async function createTraining(req: Request, res: Response) {
       errors.push(`Invalid level "${levelLabel}". Must be one of: ${Object.keys(TRAINING_LEVEL_FROM_LABEL).join(", ")}`);
     }
 
-    // learningFormats arrives as a JSON-stringified string from multipart/form-data
-    // e.g. '["Demo","Didactic"]' — parse it back to an array before validating
+    // learningFormats
     let parsedLearningFormatLabels: string[] = [];
     if (typeof learningFormatLabels === "string") {
       try {
         const parsed = JSON.parse(learningFormatLabels);
         if (Array.isArray(parsed)) parsedLearningFormatLabels = parsed;
       } catch {
-        // leave as empty array — will fail validation below
+        // leave as empty array
       }
     } else if (Array.isArray(learningFormatLabels)) {
       parsedLearningFormatLabels = learningFormatLabels;
     }
 
-    // Learning formats validation
     let learningFormats: LearningFormat[] | null = null;
     if (parsedLearningFormatLabels.length === 0) {
       errors.push("learningFormats must be a non-empty array");
     } else {
       learningFormats = learningFormatsFromLabels(parsedLearningFormatLabels);
       if (!learningFormats) {
-        errors.push(`Invalid learningFormats. Each value must be one of: Demo, Didactic, Discussion`);
+        errors.push("Invalid learningFormats. Each value must be one of: Demo, Didactic, Discussion");
       }
     }
+
+    // subOptions — optional, only for MINT_LIFT_GROUP_TRAINING
+    const subOptions = parseSubOptions(subOptionsRaw, errors);
 
     if (errors.length > 0) {
       return res.status(400).json({ success: false, message: "Validation failed", errors });
     }
 
-    // Background image path (optional)
     const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
     const backgroundImagePath = files?.backgroundImage?.[0]
       ? `uploads/trainings-bg-img/${files.backgroundImage[0].filename}`
@@ -135,8 +148,6 @@ export async function createTraining(req: Request, res: Response) {
       : undefined;
 
     const adminId = (req as any).userId as string;
-
-    // Auto-populate price and creditScore from the level — not a client input
     const { price, creditScore } = TRAINING_LEVEL_PRICING[level!];
 
     const training = await trainingService.createTraining({
@@ -157,6 +168,7 @@ export async function createTraining(req: Request, res: Response) {
       price,
       creditScore,
       createdBy:       adminId,
+      subOptions,
     });
 
     return res.status(201).json({
@@ -170,16 +182,8 @@ export async function createTraining(req: Request, res: Response) {
   }
 }
 
-// ─── ADD THIS to training.controller.ts ──────────────────────────────────────
-// Place after the createTraining() controller
-
 // ─── Admin: Update Training ───────────────────────────────────────────────────
 
-/**
- * PATCH /api/admin/trainings/:id
- * Updates an existing training session. Admin only.
- * All fields are optional — only provided fields are updated.
- */
 export async function updateTraining(req: Request, res: Response) {
   try {
     const trainingId = req.params.id as string;
@@ -197,11 +201,10 @@ export async function updateTraining(req: Request, res: Response) {
       description,
       location,
       scheduledAt: scheduledAtRaw,
+      subOptions: subOptionsRaw,
     } = req.body;
 
     const errors: string[] = [];
-
-    // ── Enum parsing (only if provided) ────────────────────────────────────────
 
     let type: TrainingType | undefined;
     if (typeLabel !== undefined) {
@@ -227,8 +230,6 @@ export async function updateTraining(req: Request, res: Response) {
       }
     }
 
-    // ── learningFormats (optional, JSON-stringified from multipart) ────────────
-
     let learningFormats: LearningFormat[] | undefined;
     if (learningFormatLabels !== undefined) {
       let parsedLabels: string[] = [];
@@ -237,7 +238,7 @@ export async function updateTraining(req: Request, res: Response) {
           const parsed = JSON.parse(learningFormatLabels);
           if (Array.isArray(parsed)) parsedLabels = parsed;
         } catch {
-          // leave empty — will fail validation below
+          // leave empty
         }
       } else if (Array.isArray(learningFormatLabels)) {
         parsedLabels = learningFormatLabels;
@@ -255,8 +256,6 @@ export async function updateTraining(req: Request, res: Response) {
       }
     }
 
-    // ── scheduledAt (optional) ─────────────────────────────────────────────────
-
     let scheduledAt: Date | null | undefined;
     if (scheduledAtRaw !== undefined) {
       if (scheduledAtRaw === null || scheduledAtRaw === "") {
@@ -270,11 +269,14 @@ export async function updateTraining(req: Request, res: Response) {
       }
     }
 
+    // subOptions — optional
+    const subOptions = subOptionsRaw !== undefined
+      ? parseSubOptions(subOptionsRaw, errors)
+      : undefined;
+
     if (errors.length > 0) {
       return res.status(400).json({ success: false, message: "Validation failed", errors });
     }
-
-    // ── Background image (optional) ────────────────────────────────────────────
 
     const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
     const backgroundImagePath = files?.backgroundImage?.[0]
@@ -299,6 +301,7 @@ export async function updateTraining(req: Request, res: Response) {
       ...(productsUsed !== undefined && { productsUsed: productsUsed?.trim() || null }),
       ...(scheduledAt  !== undefined && { scheduledAt }),
       ...(backgroundImagePath  && { backgroundImagePath }),
+      ...(subOptions   !== undefined && { subOptions }),
     });
 
     return res.json({
@@ -320,14 +323,9 @@ export async function updateTraining(req: Request, res: Response) {
 
 // ─── MED: List Trainings ──────────────────────────────────────────────────────
 
-/**
- * GET /api/trainings
- * Returns all trainings for MED users (summary view).
- */
 export async function getTrainings(req: Request, res: Response) {
   try {
     const trainings = await trainingService.getTrainings();
-
     return res.json({
       success: true,
       message: "Trainings retrieved successfully",
@@ -341,17 +339,11 @@ export async function getTrainings(req: Request, res: Response) {
 
 // ─── MED: Training Detail ─────────────────────────────────────────────────────
 
-/**
- * GET /api/trainings/:id
- * Full details of a single training, including enrollment status for the requesting user.
- */
 export async function getTrainingById(req: Request, res: Response) {
   try {
     const id = req.params.id as string;
     const requestingUserId = (req as any).userId as string | undefined;
-
     const training = await trainingService.getTrainingById(id, requestingUserId);
-
     return res.json({
       success: true,
       message: "Training retrieved successfully",
@@ -368,10 +360,6 @@ export async function getTrainingById(req: Request, res: Response) {
 
 // ─── Admin: Delete Training ───────────────────────────────────────────────────
 
-/**
- * DELETE /api/admin/trainings/:id
- * Permanently delete an unenrolled training.
- */
 export async function deleteTraining(req: Request, res: Response) {
   try {
     const trainingId = req.params.id as string;
@@ -391,10 +379,6 @@ export async function deleteTraining(req: Request, res: Response) {
 
 // ─── Admin: Cancel Training ───────────────────────────────────────────────────
 
-/**
- * POST /api/admin/trainings/:id/cancel
- * Cancel a training with exactly 1 paid enrollee and issue a refund.
- */
 export async function cancelTraining(req: Request, res: Response) {
   try {
     const trainingId = req.params.id as string;
@@ -418,9 +402,6 @@ export async function cancelTraining(req: Request, res: Response) {
 
 // ─── Admin: Enrollees for a Training ─────────────────────────────────────────
 
-/**
- * GET /api/admin/trainings/:id/enrollees
- */
 export async function getTrainingEnrollees(req: Request, res: Response) {
   try {
     const trainingId = req.params.id as string;
