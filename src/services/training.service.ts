@@ -295,6 +295,7 @@ export async function initiateEnrollment(
   }
 
   // ✅ Apply discount code if provided
+  console.log('[initiateEnrollment] discountCode received:', discountCode);
   if (discountCode && enrollmentType === EnrollmentType.ENROLLEE) {
     const discount = await prisma.discountCode.findUnique({
       where: { code: discountCode.toUpperCase() },
