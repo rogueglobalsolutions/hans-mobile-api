@@ -13,12 +13,17 @@ export async function getConfig(req: Request, res: Response) {
 export async function createPaymentIntent(req: Request, res: Response) {
   try {
     const userId = (req as any).userId as string;
-    const { trainingId, salesRepId } = req.body;
+    const { trainingId, salesRepId, subOptionIndex } = req.body;
     if (!trainingId) {
       res.status(400).json({ success: false, message: "trainingId is required" });
       return;
     }
-    const result = await trainingService.initiateEnrollment(userId, trainingId, salesRepId);
+    const result = await trainingService.initiateEnrollment(
+      userId,
+      trainingId,
+      salesRepId,
+      subOptionIndex !== undefined ? Number(subOptionIndex) : undefined,
+    );
     res.json({ success: true, data: result });
   } catch (err) {
     const msg = sanitizeError(err, "createPaymentIntent");
