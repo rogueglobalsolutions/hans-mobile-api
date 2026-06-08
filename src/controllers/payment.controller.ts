@@ -14,12 +14,10 @@ export async function createPaymentIntent(req: Request, res: Response) {
   try {
     const userId = (req as any).userId as string;
     const { trainingId, salesRepId } = req.body;
-
     if (!trainingId) {
       res.status(400).json({ success: false, message: "trainingId is required" });
       return;
     }
-
     const result = await trainingService.initiateEnrollment(userId, trainingId, salesRepId);
     res.json({ success: true, data: result });
   } catch (err) {
@@ -51,15 +49,30 @@ export async function confirmPayment(req: Request, res: Response) {
   }
 }
 
+// ─── Called by client when user cancels/dismisses payment sheet ───────────────
+
+export async function failPayment(req: Request, res: Response) {
+  try {
+    const { paymentIntentId } = req.body;
+    if (!paymentIntentId) {
+      res.status(400).json({ success: false, message: "paymentIntentId is required" });
+      return;
+    }
+    await trainingService.failEnrollment(paymentIntentId);
+    res.json({ success: true, message: "Enrollment marked as failed" });
+  } catch (err) {
+    const msg = sanitizeError(err, "failPayment");
+    res.status(400).json({ success: false, message: msg });
+  }
+}
+
 export async function handleWebhook(req: Request, res: Response) {
   const sig = req.headers["stripe-signature"] as string;
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
   if (!webhookSecret) {
     res.status(500).json({ success: false, message: "Webhook secret not configured" });
     return;
   }
-
   let event;
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
@@ -68,11 +81,14 @@ export async function handleWebhook(req: Request, res: Response) {
     res.status(400).json({ success: false, message: "Webhook signature verification failed" });
     return;
   }
-
   try {
     if (event.type === "payment_intent.succeeded") {
       const paymentIntent = event.data.object as any;
       await trainingService.confirmEnrollmentPayment(paymentIntent.id);
+    }
+    if (event.type === "payment_intent.payment_failed" || event.type === "payment_intent.canceled") {
+      const paymentIntent = event.data.object as any;
+      await trainingService.failEnrollment(paymentIntent.id);
     }
     res.json({ received: true });
   } catch (err) {

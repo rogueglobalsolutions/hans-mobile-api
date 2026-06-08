@@ -66,8 +66,6 @@ export async function createTraining(input: CreateTrainingInput) {
     },
   });
 }
-// ─── ADD THIS to training.service.ts ─────────────────────────────────────────
-// Place after the createTraining() function
 
 export interface UpdateTrainingInput {
   type?: TrainingType;
@@ -91,10 +89,14 @@ export interface UpdateTrainingInput {
 export async function updateTraining(trainingId: string, input: UpdateTrainingInput) {
   const training = await prisma.training.findUnique({
     where: { id: trainingId },
-    include: { _count: { select: { enrollments: true } } },
   });
   if (!training) throw new Error("Training not found");
-  if (training._count.enrollments > 0) {
+
+  // ✅ Only count COMPLETED enrollments — PENDING/FAILED don't lock editing
+  const completedCount = await prisma.enrollment.count({
+    where: { trainingId, paymentStatus: PaymentStatus.COMPLETED },
+  });
+  if (completedCount > 0) {
     throw new Error("Training cannot be edited once it has students.");
   }
 
@@ -133,14 +135,15 @@ export async function updateTraining(trainingId: string, input: UpdateTrainingIn
 export async function deleteTraining(trainingId: string) {
   const training = await prisma.training.findUnique({
     where: { id: trainingId },
-    select: {
-      id: true,
-      _count: { select: { enrollments: true } },
-    },
+    select: { id: true },
   });
-
   if (!training) throw new Error("Training not found");
-  if (training._count.enrollments > 0) {
+
+  // ✅ Only count COMPLETED enrollments — PENDING/FAILED don't block deletion
+  const completedCount = await prisma.enrollment.count({
+    where: { trainingId, paymentStatus: PaymentStatus.COMPLETED },
+  });
+  if (completedCount > 0) {
     throw new Error("Training cannot be deleted once it has enrollments. Cancel it instead.");
   }
 
@@ -251,7 +254,7 @@ export async function initiateEnrollment(
   if (!training) throw new Error("Training not found");
   if (training.status !== TrainingStatus.ACTIVE) throw new Error("Training is not available for enrollment");
 
-  // Check slot availability
+  // Check slot availability — only count COMPLETED enrollments
   const enrolleeCount = await prisma.enrollment.count({
     where: { trainingId, type: EnrollmentType.ENROLLEE, paymentStatus: PaymentStatus.COMPLETED },
   });
@@ -275,21 +278,10 @@ export async function initiateEnrollment(
       : TRAINING_LEVEL_STRIPE_PRICES[training.level];
   const stripePrice = await stripe.prices.retrieve(stripePriceId);
 
-  if (!stripePrice.active) {
-    throw new Error(`Stripe price is inactive: ${stripePriceId}`);
-  }
-
-  if (stripePrice.currency.toLowerCase() !== "usd") {
-    throw new Error(`Stripe price currency must be USD: ${stripePriceId}`);
-  }
-
-  if (stripePrice.type !== "one_time") {
-    throw new Error(`Stripe price must be one_time: ${stripePriceId}`);
-  }
-
-  if (stripePrice.unit_amount == null) {
-    throw new Error(`Stripe price unit_amount is missing: ${stripePriceId}`);
-  }
+  if (!stripePrice.active) throw new Error(`Stripe price is inactive: ${stripePriceId}`);
+  if (stripePrice.currency.toLowerCase() !== "usd") throw new Error(`Stripe price currency must be USD: ${stripePriceId}`);
+  if (stripePrice.type !== "one_time") throw new Error(`Stripe price must be one_time: ${stripePriceId}`);
+  if (stripePrice.unit_amount == null) throw new Error(`Stripe price unit_amount is missing: ${stripePriceId}`);
 
   const amountCents = stripePrice.unit_amount;
   const amountUsd = amountCents / 100;
@@ -308,10 +300,12 @@ export async function initiateEnrollment(
     }
   }
 
-  // Check not already enrolled (with completed payment)
+  // Check existing enrollment
   const existing = await prisma.enrollment.findUnique({
     where: { userId_trainingId: { userId, trainingId } },
   });
+
+  // Already paid — block
   if (existing && existing.paymentStatus === PaymentStatus.COMPLETED) {
     throw new Error("Already enrolled in this training");
   }
@@ -321,11 +315,11 @@ export async function initiateEnrollment(
     amount: amountCents,
     currency: "usd",
     metadata: { trainingId, userId, enrollmentType, stripePriceId },
-    payment_method_types: ['card'], // add 'paypal' here later
+    payment_method_types: ['card'],
   });
 
-  // Upsert pending enrollment (handle case where user retries after failed payment)
   if (existing) {
+    // ✅ Mark old PENDING/FAILED enrollment — update with new payment intent
     await prisma.enrollment.update({
       where: { userId_trainingId: { userId, trainingId } },
       data: {
@@ -397,7 +391,7 @@ export async function confirmEnrollmentPayment(paymentIntentId: string) {
     }
   });
 
-  // Send enrollment confirmation email (don't block payment confirmation on email failure)
+  // Send enrollment confirmation email
   try {
     const { sendEnrollmentConfirmationEmail } = await import("./email.service");
     await sendEnrollmentConfirmationEmail({
@@ -417,6 +411,23 @@ export async function confirmEnrollmentPayment(paymentIntentId: string) {
   }
 
   return { message: "Enrollment confirmed", alreadyConfirmed: false };
+}
+
+/**
+ * Mark a PENDING enrollment as FAILED — called when user cancels payment.
+ */
+export async function failEnrollment(paymentIntentId: string) {
+  const enrollment = await prisma.enrollment.findFirst({
+    where: {
+      stripePaymentIntentId: paymentIntentId,
+      paymentStatus: PaymentStatus.PENDING,
+    },
+  });
+  if (!enrollment) return; // Already completed or doesn't exist — ignore
+  await prisma.enrollment.update({
+    where: { id: enrollment.id },
+    data: { paymentStatus: PaymentStatus.FAILED },
+  });
 }
 
 /**
@@ -443,7 +454,6 @@ export async function cancelTraining(trainingId: string, adminId: string) {
   const enrollment = enrollees[0];
   if (!enrollment.stripePaymentIntentId) throw new Error("No payment found for this enrollment");
 
-  // Issue Stripe refund
   const refund = await stripe.refunds.create({ payment_intent: enrollment.stripePaymentIntentId });
 
   await prisma.$transaction(async (tx) => {
@@ -461,7 +471,6 @@ export async function cancelTraining(trainingId: string, adminId: string) {
     });
   });
 
-  // Send cancellation email
   const refundAmountUsd = enrollment.paidAmount ?? 0;
   await sendTrainingCancellationEmail(
     enrollment.user.email,

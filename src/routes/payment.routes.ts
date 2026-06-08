@@ -25,6 +25,13 @@ router.post(
 
 // MED-only — confirm enrollment after successful payment
 router.post(
+  "/fail",
+  authenticateToken,
+  requireRole(Role.MED),
+  paymentController.failPayment,
+);
+
+router.post(
   "/confirm",
   authenticateToken,
   requireRole(Role.MED),
