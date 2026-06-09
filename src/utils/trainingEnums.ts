@@ -47,6 +47,7 @@ export const TRAINING_LEVEL_LABELS: Record<TrainingLevel, string> = {
   [TrainingLevel.ADVANCED]:                 "Advanced",
   [TrainingLevel.PACKAGE_BUNDLE_1]:         "Package Bundle 1",
   [TrainingLevel.PACKAGE_BUNDLE_2]:         "Package Bundle 2",
+  [TrainingLevel.SPECIAL_OFFER]:            "Special Offer",
 };
 
 export const TRAINING_LEVEL_FROM_LABEL: Record<string, TrainingLevel> = {
@@ -55,6 +56,7 @@ export const TRAINING_LEVEL_FROM_LABEL: Record<string, TrainingLevel> = {
   "Advanced":                 TrainingLevel.ADVANCED,
   "Package Bundle 1":         TrainingLevel.PACKAGE_BUNDLE_1,
   "Package Bundle 2":         TrainingLevel.PACKAGE_BUNDLE_2,
+  "Special Offer":            TrainingLevel.SPECIAL_OFFER,
   // Merged UI sub-options (Mint Lift Group Training dropdown)
   "Mint Lift Group Training – Mint Lift Group Training $3000 with $1500 product credits": TrainingLevel.MINT_LIFT_GROUP_TRAINING,
   "Mint Lift Group Training – Mint Lift Group Training $1500 without product credits":    TrainingLevel.SUPPLEMENTAL,
@@ -97,6 +99,7 @@ export const TRAINING_LEVEL_PRICING: Record<TrainingLevel, LevelPricing> = {
   [TrainingLevel.ADVANCED]:                 { price: 6000, creditScore: 3000 },
   [TrainingLevel.PACKAGE_BUNDLE_1]:         { price: 5000, creditScore: 2500 },
   [TrainingLevel.PACKAGE_BUNDLE_2]:         { price: 8000, creditScore: 4500 },
+  [TrainingLevel.SPECIAL_OFFER]:            { price: 500,  creditScore: 0 },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

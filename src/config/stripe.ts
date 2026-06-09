@@ -15,6 +15,7 @@ export const TRAINING_LEVEL_STRIPE_PRICES: Record<TrainingLevel, string> = {
   ADVANCED:                 getPriceId("STRIPE_PRICE_ADVANCED", "price_1TRutgFuRxYezPHDoqyEPn0L"),
   PACKAGE_BUNDLE_1:         getPriceId("STRIPE_PRICE_PACKAGE_BUNDLE_1", "price_1TRuuCFuRxYezPHDW8qw7LPD"),
   PACKAGE_BUNDLE_2:         getPriceId("STRIPE_PRICE_PACKAGE_BUNDLE_2", "price_1TRuupFuRxYezPHD5ClaxvmF"),
+  SPECIAL_OFFER:            getPriceId("STRIPE_PRICE_SPECIAL_OFFER", "price_1TeyHtFuRxYezPHDqcDR6oMU"),
 };
 
 // Observer one-time price id

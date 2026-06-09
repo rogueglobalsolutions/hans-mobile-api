@@ -40,6 +40,7 @@ enum TrainingLevel {
   ADVANCED
   PACKAGE_BUNDLE_1
   PACKAGE_BUNDLE_2
+  SPECIAL_OFFER
 }
 
 enum TrainingStatus {
