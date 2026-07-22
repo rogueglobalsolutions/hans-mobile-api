@@ -7,6 +7,7 @@ const SAFE_MESSAGES: Record<string, string> = {
   "Invalid or expired reset token": "Invalid or expired reset token",
   "Invalid role": "Invalid role",
   "Account suspended": "Your account has been suspended. Please contact support.",
+  "Access denied. Admin account required.": "Access denied. Admin account required.",
   "User not found": "User not found",
   "Account not eligible for verification": "Account is not eligible for verification",
   "User is not pending verification": "User is not pending verification",
@@ -64,6 +65,7 @@ const SAFE_MESSAGES: Record<string, string> = {
 const FALLBACK_MESSAGES: Record<string, string> = {
   register: "Registration failed. Please try again.",
   login: "Login failed. Please try again.",
+  webLogin: "Login failed. Please try again.",
   forgotPassword: "Request failed. Please try again.",
   verifyOtp: "OTP verification failed. Please try again.",
   resetPassword: "Password reset failed. Please try again.",

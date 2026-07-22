@@ -24,6 +24,7 @@ import { initSocket } from "./socket";
 import supportRoutes from "./routes/support.routes";
 import adsRoutes from "./routes/ads.routes";
 import discountRoutes from "./routes/discount.routes";
+import webAuthRoutes from "./routes/web/webAuth.routes";
 
 const app = express();
 const server = http.createServer(app);
@@ -59,6 +60,7 @@ app.use("/api/support", supportRoutes);
 app.use("/api/locations", locationRoutes);
 app.use("/api/ads", adsRoutes);
 app.use("/api/discounts", discountRoutes);
+app.use("/api/web/auth", webAuthRoutes);
 app.use(express.static(path.join(process.cwd(), "public")));
 
 // Public — list sales reps for registration dropdown (MED + ADMIN)
