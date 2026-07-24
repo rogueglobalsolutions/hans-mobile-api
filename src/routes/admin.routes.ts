@@ -109,6 +109,10 @@ router.get("/commerce/products/:id", commerceController.getProductById);
 router.patch("/commerce/products/:id", commerceController.updateProduct);
 router.patch("/commerce/products/:id/status", commerceController.updateProductStatus);
 router.patch("/commerce/products/:id/stock", commerceController.updateProductStock);
+router.patch("/commerce/products/:id/variants/:variantId/stock", commerceController.updateProductVariantStock);
+
+router.get("/commerce/collections", commerceController.getCollections);
+router.get("/commerce/inventory", commerceController.getInventory);
 
 router.get("/commerce/customers", commerceController.getCustomers);
 router.get("/commerce/customers/:id", commerceController.getCustomerById);

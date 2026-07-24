@@ -6,3 +6,7 @@ node_modules
 /src/generated/prisma
 /uploads
 /dist
+
+# Junction to hans-native's assets/products, used only to serve product
+# images locally in dev. Not real files in this repo — do not commit.
+/public/assets/products

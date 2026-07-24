@@ -1,5 +1,8 @@
+import fs from "fs";
+import path from "path";
 import prisma from "../config/prisma";
 import { stripe } from "../config/stripe";
+import { syncProductToJson } from "./productJsonSync.service";
 import {
   AccountStatus,
   CommerceOrderStatus,
@@ -8,6 +11,7 @@ import {
   FulfillmentStatus,
   OrderRefundStatus,
   OrderVerificationStatus,
+  PaymentStatus,
   ProductStatus,
   Role,
   ShippingLabelStatus,
@@ -185,9 +189,33 @@ function accountStatusToDisplay(status: AccountStatus) {
   return status === AccountStatus.SUSPENDED ? "suspended" : "active";
 }
 
+const ASSETS_ROOT = path.join(__dirname, "..", "..", "public");
+const PRIMARY_IMAGE_CANDIDATES = ["1.png", "1.jpg", "1.jpeg", "1.webp"];
+
+function assetPathToImageUrl(assetPath: string | null): string | null {
+  if (!assetPath) return null;
+
+  const dirOnDisk = path.join(ASSETS_ROOT, assetPath);
+  const filename =
+    PRIMARY_IMAGE_CANDIDATES.find((name) => {
+      try {
+        return fs.existsSync(path.join(dirOnDisk, name));
+      } catch {
+        return false;
+      }
+    }) ?? null;
+  if (!filename) return null;
+
+  const encoded = assetPath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `/${encoded}/${filename}`;
+}
+
 function formatProduct(product: any) {
-  const primaryImage = product.imageUrl || product.images?.[0]?.url || null;
   const primaryAsset = product.assetPath || product.images?.[0]?.assetPath || null;
+  const primaryImage = product.imageUrl || product.images?.[0]?.url || assetPathToImageUrl(primaryAsset);
 
   return {
     id: product.id,
@@ -201,6 +229,7 @@ function formatProduct(product: any) {
     stockQty: product.stockQty,
     lowStockThreshold: product.lowStockThreshold,
     status: productDisplayStatus(product),
+    visibilityStatus: product.status === ProductStatus.ACTIVE ? "active" : "hidden",
     category: product.category,
     vendor: product.vendor,
     sku: product.sku,
@@ -501,6 +530,7 @@ export async function updateProduct(productId: string, adminId: string, input: a
       data: {
         ...(input.name != null ? { name: String(input.name).trim() } : {}),
         ...(input.description != null ? { description: String(input.description).trim() } : {}),
+        ...(input.category !== undefined ? { category: input.category || null } : {}),
         ...(input.price != null ? { priceCents: fromDollars(Number(input.price)) } : {}),
         ...(input.compareAtPrice !== undefined ? { compareAtPriceCents: fromDollars(input.compareAtPrice === null || input.compareAtPrice === "" ? null : Number(input.compareAtPrice)) } : {}),
         ...(input.stockQty != null ? { stockQty: nextStockQty } : {}),
@@ -534,7 +564,54 @@ export async function updateProduct(productId: string, adminId: string, input: a
     return updated;
   });
 
+  if (input.name != null || input.description != null) {
+    syncProductToJson({
+      vendor: existing.vendor,
+      oldName: existing.name,
+      newName: input.name != null ? product.name : undefined,
+      newDescription: input.description != null ? product.description : undefined,
+    });
+  }
+
   return getProductById(product.id);
+}
+
+export async function updateProductVariantStock(
+  productId: string,
+  variantId: string,
+  adminId: string,
+  stockQty: number,
+  note?: string,
+) {
+  const variant = await prisma.productVariant.findUnique({ where: { id: variantId } });
+  if (!variant || variant.productId !== productId) throw new Error("Variant not found");
+
+  const previousStockQty = variant.stockQty ?? 0;
+  const nextStockQty = Number(stockQty);
+  const stockChanged = nextStockQty !== previousStockQty;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.productVariant.update({
+      where: { id: variantId },
+      data: { stockQty: nextStockQty },
+    });
+
+    if (stockChanged) {
+      await tx.stockAuditLog.create({
+        data: {
+          productId,
+          variantId,
+          previousStockQty,
+          newStockQty: nextStockQty,
+          delta: nextStockQty - previousStockQty,
+          note: note || null,
+          adjustedById: adminId,
+        },
+      });
+    }
+  });
+
+  return getProductById(productId);
 }
 
 export async function updateProductStatus(productId: string, status: string) {
@@ -558,6 +635,90 @@ export async function getLowStockProducts(threshold = 5) {
     include: { images: { orderBy: { sortOrder: "asc" }, take: 1 } },
   });
   return products.map(formatProduct);
+}
+
+/**
+ * Vendor-based automated collections — same mechanism as a Shopify smart collection
+ * ("Vendor is X"), just computed live from the Product table instead of a stored rule.
+ * There's no separate Collection model; membership always reflects current products,
+ * so a newly added product with a matching vendor shows up automatically.
+ */
+export async function getVendorCollections() {
+  const grouped = await prisma.product.groupBy({
+    by: ["vendor"],
+    where: { vendor: { not: null } },
+    _count: { _all: true },
+  });
+
+  const collections = await Promise.all(
+    grouped
+      .filter((g): g is typeof g & { vendor: string } => !!g.vendor)
+      .map(async (g) => {
+        const sample = await prisma.product.findFirst({
+          where: { vendor: g.vendor },
+          orderBy: { createdAt: "asc" },
+          include: { images: { orderBy: { sortOrder: "asc" }, take: 1 } },
+        });
+        return {
+          id: g.vendor,
+          title: g.vendor,
+          productCount: g._count._all,
+          condition: `Vendor is ${g.vendor}`,
+          imageUrl: sample ? formatProduct(sample).imageUrl : null,
+        };
+      }),
+  );
+
+  return collections.sort((a, b) => b.productCount - a.productCount);
+}
+
+/**
+ * Inventory = a cross-product view built on top of the same stockQty the product edit
+ * page calls "Stock quantity" (that's "On hand" here — same field, same value).
+ * What's new is "Committed": quantity sitting in orders that are placed but not yet
+ * fulfilled, computed live from real OrderItem/Order data. "Available" = On hand minus
+ * Committed, i.e. what's actually left to sell right now.
+ *
+ * "Unavailable" and "Incoming" are always 0 — we don't yet track damaged/reserved stock
+ * or open purchase orders (no schema for either), so those columns exist for layout
+ * parity with the reference UI but carry no real signal yet.
+ */
+export async function getInventory() {
+  const [products, committedRows] = await Promise.all([
+    prisma.product.findMany({
+      orderBy: { name: "asc" },
+      include: { images: { orderBy: { sortOrder: "asc" }, take: 1 } },
+    }),
+    prisma.orderItem.groupBy({
+      by: ["productId"],
+      where: {
+        productId: { not: null },
+        order: {
+          status: { not: CommerceOrderStatus.CANCELLED },
+          fulfillmentStatus: { not: FulfillmentStatus.FULFILLED },
+        },
+      },
+      _sum: { quantity: true },
+    }),
+  ]);
+
+  const committedByProduct = new Map(committedRows.map((row) => [row.productId as string, row._sum.quantity ?? 0]));
+
+  return products.map((product) => {
+    const onHand = product.stockQty;
+    const committed = committedByProduct.get(product.id) ?? 0;
+    return {
+      id: product.id,
+      name: product.name,
+      sku: product.sku,
+      imageUrl: formatProduct(product).imageUrl,
+      unavailable: 0,
+      committed,
+      available: onHand - committed,
+      onHand,
+      incoming: 0,
+    };
+  });
 }
 
 export async function getOrders(filters: OrderFilters = {}) {
@@ -850,10 +1011,17 @@ export async function getCustomers(input: PaginationInput & { search?: string; r
     sales_rep: Role.SALES_REP,
     admin: Role.ADMIN,
   };
-  const role = input.role && input.role !== "all" ? roleMap[input.role] : undefined;
+  // "customers" is additive to roleMap: paying customers only (USER + MED), excluding
+  // internal staff (SALES_REP, ADMIN) that "all"/undefined would otherwise include.
+  const roleFilter =
+    input.role === "customers"
+      ? { in: [Role.USER, Role.MED] }
+      : input.role && input.role !== "all"
+        ? roleMap[input.role]
+        : undefined;
 
   const where: any = {
-    ...(role ? { role } : {}),
+    ...(roleFilter ? { role: roleFilter } : {}),
     ...(search
       ? {
           OR: [
@@ -865,7 +1033,7 @@ export async function getCustomers(input: PaginationInput & { search?: string; r
       : {}),
   };
 
-  const [items, total] = await Promise.all([
+  const [items, total, orderSums, trainingSums] = await Promise.all([
     prisma.user.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -874,19 +1042,41 @@ export async function getCustomers(input: PaginationInput & { search?: string; r
       include: { _count: { select: { commerceOrders: true } } },
     }),
     prisma.user.count({ where }),
+    // Product purchases — Order.totalAmountCents is in cents.
+    prisma.order.groupBy({
+      by: ["userId"],
+      where: { userId: { not: null }, paymentStatus: CommercePaymentStatus.PAID },
+      _sum: { totalAmountCents: true },
+    }),
+    // Training program registrations — Enrollment.paidAmount is already in dollars.
+    prisma.enrollment.groupBy({
+      by: ["userId"],
+      where: { paymentStatus: PaymentStatus.COMPLETED },
+      _sum: { paidAmount: true },
+    }),
   ]);
 
+  const orderSpendByUser = new Map(orderSums.map((row) => [row.userId as string, row._sum.totalAmountCents ?? 0]));
+  const trainingSpendByUser = new Map(trainingSums.map((row) => [row.userId, row._sum.paidAmount ?? 0]));
+
   return {
-    items: items.map((user) => ({
-      id: user.id,
-      name: user.fullName,
-      email: user.email,
-      phone: user.phoneNumber,
-      role: roleToCustomerRole(user.role),
-      createdAt: user.createdAt,
-      accountStatus: accountStatusToDisplay(user.accountStatus),
-      orderCount: user._count.commerceOrders,
-    })),
+    items: items.map((user) => {
+      const orderSpend = toDollars(orderSpendByUser.get(user.id) ?? 0);
+      const trainingSpend = trainingSpendByUser.get(user.id) ?? 0;
+      const location = [user.city, user.stateProvince, user.country].filter(Boolean).join(", ");
+      return {
+        id: user.id,
+        name: user.fullName,
+        email: user.email,
+        phone: user.phoneNumber,
+        role: roleToCustomerRole(user.role),
+        createdAt: user.createdAt,
+        accountStatus: accountStatusToDisplay(user.accountStatus),
+        orderCount: user._count.commerceOrders,
+        amountSpent: orderSpend + trainingSpend,
+        location: location || null,
+      };
+    }),
     total,
     page,
     limit,

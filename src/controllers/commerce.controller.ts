@@ -119,12 +119,51 @@ export async function updateProductStock(req: Request, res: Response) {
   }
 }
 
+export async function updateProductVariantStock(req: Request, res: Response) {
+  try {
+    const stockQty = num(req.body.stockQty);
+    if (stockQty == null) {
+      res.status(400).json({ success: false, message: "stockQty is required" });
+      return;
+    }
+    const adminId = (req as any).userId as string;
+    const data = await commerceService.updateProductVariantStock(
+      param(req.params.id),
+      param(req.params.variantId),
+      adminId,
+      stockQty,
+      req.body.note,
+    );
+    res.json({ success: true, data });
+  } catch (err) {
+    sendError(res, err, "updateCommerceProductVariantStock", 400);
+  }
+}
+
 export async function getLowStockProducts(req: Request, res: Response) {
   try {
     const data = await commerceService.getLowStockProducts(num(req.query.threshold));
     res.json({ success: true, data });
   } catch (err) {
     sendError(res, err, "getLowStockProducts");
+  }
+}
+
+export async function getCollections(req: Request, res: Response) {
+  try {
+    const data = await commerceService.getVendorCollections();
+    res.json({ success: true, data });
+  } catch (err) {
+    sendError(res, err, "getCommerceCollections");
+  }
+}
+
+export async function getInventory(req: Request, res: Response) {
+  try {
+    const data = await commerceService.getInventory();
+    res.json({ success: true, data });
+  } catch (err) {
+    sendError(res, err, "getCommerceInventory");
   }
 }
 
