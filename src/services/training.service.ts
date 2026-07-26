@@ -7,6 +7,7 @@ import {
 import { LearningFormat } from "../utils/trainingEnums";
 import { sendTrainingCancellationEmail } from "./email.service";
 import { TRAINING_LEVEL_PRICING } from "../utils/trainingEnums";
+import { redeemDiscountCode } from "./discount.service";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -424,6 +425,15 @@ export async function confirmEnrollmentPayment(paymentIntentId: string) {
       });
     }
   });
+
+  const discountCode = paymentIntent.metadata?.discountCode;
+  if (discountCode) {
+    try {
+      await redeemDiscountCode(discountCode);
+    } catch (discountError) {
+      console.error("Failed to record discount code redemption:", discountError);
+    }
+  }
 
   try {
     const { sendEnrollmentConfirmationEmail } = await import("./email.service");
