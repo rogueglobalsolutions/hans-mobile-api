@@ -247,3 +247,27 @@ export const uploadChatImage = multer({
   fileFilter: imageFileFilter,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
 });
+
+// ─── Product images (admin catalog) ───────────────────────────────────────────
+
+const productImagesDir = path.join(process.cwd(), "uploads", "product-images");
+if (!fs.existsSync(productImagesDir)) {
+  fs.mkdirSync(productImagesDir, { recursive: true });
+}
+
+const productImageStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, productImagesDir);
+  },
+  filename: (_req, file, cb) => {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    cb(null, `product_${timestamp}_${Math.random().toString(36).slice(2, 6)}${ext}`);
+  },
+});
+
+export const uploadProductImage = multer({
+  storage: productImageStorage,
+  fileFilter: imageFileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+});

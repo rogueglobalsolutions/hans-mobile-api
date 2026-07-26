@@ -517,6 +517,121 @@ export async function getProductById(productId: string, publicOnly = false) {
   };
 }
 
+interface CreateProductVariantInput {
+  label: string;
+  price?: number | null;
+  sku?: string | null;
+  stripePriceId?: string | null;
+}
+
+interface CreateProductInput {
+  name: string;
+  description: string;
+  category?: string | null;
+  vendor: string;
+  price?: number | null;
+  compareAtPrice?: number | null;
+  stockQty?: number;
+  lowStockThreshold?: number;
+  status?: string;
+  sku?: string | null;
+  imageUrl?: string | null;
+  stripeProductId?: string | null;
+  stripeDefaultPriceId?: string | null;
+  shippingInfo?: string | null;
+  returnAndExchange?: string | null;
+  shelfLife?: string | null;
+  disclaimer?: string | null;
+  usedWith?: string | null;
+  fdaCleared?: boolean;
+  securePackaging?: boolean;
+  groundShippingOnly?: boolean;
+  variants?: CreateProductVariantInput[];
+}
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+async function generateUniqueSlug(name: string) {
+  const base = slugify(name) || "product";
+  let slug = base;
+  let suffix = 2;
+  while (await prisma.product.findUnique({ where: { slug } })) {
+    slug = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return slug;
+}
+
+async function ensureUniqueSku(sku: string) {
+  let candidate = sku;
+  let suffix = 2;
+  while (await prisma.product.findUnique({ where: { sku: candidate } })) {
+    candidate = `${sku}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+export async function createProduct(input: CreateProductInput) {
+  if (!input.name?.trim()) throw new Error("Product name is required");
+  if (!input.description?.trim()) throw new Error("Product description is required");
+  if (!input.vendor?.trim()) throw new Error("Vendor is required");
+
+  const slug = await generateUniqueSlug(input.name.trim());
+  const sku = input.sku?.trim() ? await ensureUniqueSku(input.sku.trim()) : null;
+  const validVariants = (input.variants ?? []).filter((v) => v.label?.trim());
+
+  const product = await prisma.product.create({
+    data: {
+      name: input.name.trim(),
+      slug,
+      sku,
+      description: input.description.trim(),
+      category: input.category?.trim() || null,
+      vendor: input.vendor.trim(),
+      priceCents: fromDollars(input.price ?? null),
+      compareAtPriceCents: fromDollars(input.compareAtPrice ?? null),
+      currency: "USD",
+      stockQty: input.stockQty ?? 0,
+      lowStockThreshold: input.lowStockThreshold ?? 5,
+      status: input.status?.toLowerCase() === "active" ? ProductStatus.ACTIVE : ProductStatus.HIDDEN,
+      imageUrl: input.imageUrl || null,
+      stripeProductId: input.stripeProductId?.trim() || null,
+      stripeDefaultPriceId: input.stripeDefaultPriceId?.trim() || null,
+      shippingInfo: input.shippingInfo?.trim() || null,
+      returnAndExchange: input.returnAndExchange?.trim() || null,
+      shelfLife: input.shelfLife?.trim() || null,
+      disclaimer: input.disclaimer?.trim() || null,
+      usedWith: input.usedWith?.trim() || null,
+      fdaCleared: input.fdaCleared ?? false,
+      securePackaging: input.securePackaging ?? false,
+      groundShippingOnly: input.groundShippingOnly ?? false,
+      variants: validVariants.length
+        ? {
+            create: validVariants.map((v) => ({
+              label: v.label.trim(),
+              priceCents: fromDollars(v.price ?? null),
+              sku: v.sku?.trim() || null,
+              stripePriceId: v.stripePriceId?.trim() || null,
+            })),
+          }
+        : undefined,
+    },
+    include: {
+      variants: true,
+      images: true,
+    },
+  });
+
+  return formatProduct(product);
+}
+
 export async function updateProduct(productId: string, adminId: string, input: any) {
   const existing = await prisma.product.findUnique({ where: { id: productId } });
   if (!existing) throw new Error("Product not found");

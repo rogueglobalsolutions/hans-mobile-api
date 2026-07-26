@@ -12,6 +12,10 @@ function str(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function bool(value: unknown) {
+  return value === "true" || value === true;
+}
+
 function param(value: unknown) {
   const parsed = str(value);
   if (!parsed) throw new Error("Missing route parameter");
@@ -78,6 +82,51 @@ export async function getPublicProductById(req: Request, res: Response) {
     res.json({ success: true, data });
   } catch (err) {
     sendError(res, err, "getCommerceProductById", 404);
+  }
+}
+
+export async function createProduct(req: Request, res: Response) {
+  try {
+    const file = req.file as Express.Multer.File | undefined;
+    const imageUrl = file ? `uploads/product-images/${file.filename}` : undefined;
+
+    let variants;
+    if (typeof req.body.variants === "string" && req.body.variants.trim()) {
+      try {
+        variants = JSON.parse(req.body.variants);
+      } catch {
+        res.status(400).json({ success: false, message: "variants must be valid JSON" });
+        return;
+      }
+    }
+
+    const data = await commerceService.createProduct({
+      name: req.body.name,
+      description: req.body.description,
+      category: str(req.body.category) ?? null,
+      vendor: req.body.vendor,
+      price: num(req.body.price) ?? null,
+      compareAtPrice: num(req.body.compareAtPrice) ?? null,
+      stockQty: num(req.body.stockQty),
+      lowStockThreshold: num(req.body.lowStockThreshold),
+      status: str(req.body.status),
+      sku: str(req.body.sku) ?? null,
+      imageUrl,
+      stripeProductId: str(req.body.stripeProductId) ?? null,
+      stripeDefaultPriceId: str(req.body.stripeDefaultPriceId) ?? null,
+      shippingInfo: str(req.body.shippingInfo) ?? null,
+      returnAndExchange: str(req.body.returnAndExchange) ?? null,
+      shelfLife: str(req.body.shelfLife) ?? null,
+      disclaimer: str(req.body.disclaimer) ?? null,
+      usedWith: str(req.body.usedWith) ?? null,
+      fdaCleared: bool(req.body.fdaCleared),
+      securePackaging: bool(req.body.securePackaging),
+      groundShippingOnly: bool(req.body.groundShippingOnly),
+      variants,
+    });
+    res.status(201).json({ success: true, data });
+  } catch (err) {
+    sendError(res, err, "createCommerceProduct", 400);
   }
 }
 

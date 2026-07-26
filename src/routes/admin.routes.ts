@@ -8,7 +8,7 @@ import * as trainingDocController from "../controllers/trainingDoc.controller";
 import * as commerceController from "../controllers/commerce.controller";
 import { authenticateToken, requireRole } from "../middleware/auth";
 import { Role } from "../generated/prisma/enums";
-import { uploadTrainingBg, uploadTrainingDocs } from "../middleware/upload";
+import { uploadTrainingBg, uploadTrainingDocs, uploadProductImage } from "../middleware/upload";
 
 const router = Router();
 
@@ -105,6 +105,7 @@ router.post("/commerce/shipping-labels/:id/void", commerceController.voidShippin
 
 router.get("/commerce/products/low-stock", commerceController.getLowStockProducts);
 router.get("/commerce/products", commerceController.getAdminProducts);
+router.post("/commerce/products", uploadProductImage.single("image"), commerceController.createProduct);
 router.get("/commerce/products/:id", commerceController.getProductById);
 router.patch("/commerce/products/:id", commerceController.updateProduct);
 router.patch("/commerce/products/:id/status", commerceController.updateProductStatus);
