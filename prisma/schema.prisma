@@ -63,7 +63,7 @@ enum PaymentStatus {
 
 enum CreditTransactionType {
   EARNED // Credit added — e.g. enrolled in a training
-  SPENT  // Credit deducted — e.g. store purchase
+  SPENT // Credit deducted — e.g. store purchase
 }
 
 enum ProductStatus {
@@ -139,62 +139,62 @@ enum AppointmentStatus {
 }
 
 model User {
-  id                        String               @id @default(uuid())
-  fullName                  String
-  email                     String               @unique
-  phoneNumber               String               @unique
-  password                  String
-  role                      Role                 @default(USER)
-  accountStatus             AccountStatus        @default(ACTIVE)
-  hasSubmittedVerification  Boolean              @default(false)
-  medicalLicenseNumber      String?
-  idDocumentFrontPath       String?
-  idDocumentBackPath        String?
-  verificationNotes         String?
-  verifiedAt                DateTime?
-  verifiedBy                String?
-  creditBalance             Int                  @default(0) // Running credit score balance
-  profilePicturePath        String?
-  country                   String?
-  city                      String?
-  stateProvince             String?
-  zipCode                   String?
-  address                   String?
+  id                       String                @id @default(uuid())
+  fullName                 String
+  email                    String                @unique
+  phoneNumber              String                @unique
+  password                 String
+  role                     Role                  @default(USER)
+  accountStatus            AccountStatus         @default(ACTIVE)
+  hasSubmittedVerification Boolean               @default(false)
+  medicalLicenseNumber     String?
+  idDocumentFrontPath      String?
+  idDocumentBackPath       String?
+  verificationNotes        String?
+  verifiedAt               DateTime?
+  verifiedBy               String?
+  creditBalance            Int                   @default(0) // Running credit score balance
+  profilePicturePath       String?
+  country                  String?
+  city                     String?
+  stateProvince            String?
+  zipCode                  String?
+  address                  String?
   // Medical Director (MED role)
-  medDirectorFullName       String?
-  medDirectorTitle          String?
-  medDirectorTitleOther     String?
+  medDirectorFullName      String?
+  medDirectorTitle         String?
+  medDirectorTitleOther    String?
   // Business Information (MED role)
-  practiceName              String?
-  practiceAddressLine1      String?
-  practiceAddressLine2      String?
-  practiceCountry           String?
-  practiceCity              String?
-  practiceState             String?
-  practiceZipCode           String?
-  practicePhone             String?
-  isExistingCustomer        Boolean?
+  practiceName             String?
+  practiceAddressLine1     String?
+  practiceAddressLine2     String?
+  practiceCountry          String?
+  practiceCity             String?
+  practiceState            String?
+  practiceZipCode          String?
+  practicePhone            String?
+  isExistingCustomer       Boolean?
   // Agreements
-  agreedToTerms             Boolean              @default(false)
-  subscribedToUpdates       Boolean              @default(false)
-  createdAt                 DateTime             @default(now())
-  updatedAt                 DateTime             @updatedAt
-  otps                      Otp[]
-  enrollments               Enrollment[]
-  salesRepEnrollments       Enrollment[]         @relation("SalesRepEnrollments")
-  creditTransactions        CreditTransaction[]
-  chatMessages              ChatMessage[]
-  appointments              Appointment[]        @relation("MedAppointments")
-  salesRepAppointments      Appointment[]        @relation("SalesRepAppointments")
-  baEntries                 BeforeAndAfterEntry[]  @relation("UserBAEntries")
-  contestEntries            ContestEntry[]         @relation("UserContestEntries")
-  contestLikes              ContestLike[]          @relation("AdminContestLikes")
-  commerceOrders            Order[]                @relation("CommerceCustomerOrders")
-  verifiedCommerceOrders    Order[]                @relation("CommerceOrderVerifier")
-  commerceStatusUpdates     OrderStatusHistory[]   @relation("CommerceStatusUpdatedBy")
-  commerceRefundRequests    OrderRefund[]          @relation("CommerceRefundRequester")
-  shippingLabelRequests     ShippingLabel[]        @relation("ShippingLabelRequester")
-  stockAdjustments          StockAuditLog[]        @relation("StockAdjustedBy")
+  agreedToTerms            Boolean               @default(false)
+  subscribedToUpdates      Boolean               @default(false)
+  createdAt                DateTime              @default(now())
+  updatedAt                DateTime              @updatedAt
+  otps                     Otp[]
+  enrollments              Enrollment[]
+  salesRepEnrollments      Enrollment[]          @relation("SalesRepEnrollments")
+  creditTransactions       CreditTransaction[]
+  chatMessages             ChatMessage[]
+  appointments             Appointment[]         @relation("MedAppointments")
+  salesRepAppointments     Appointment[]         @relation("SalesRepAppointments")
+  baEntries                BeforeAndAfterEntry[] @relation("UserBAEntries")
+  contestEntries           ContestEntry[]        @relation("UserContestEntries")
+  contestLikes             ContestLike[]         @relation("AdminContestLikes")
+  commerceOrders           Order[]               @relation("CommerceCustomerOrders")
+  verifiedCommerceOrders   Order[]               @relation("CommerceOrderVerifier")
+  commerceStatusUpdates    OrderStatusHistory[]  @relation("CommerceStatusUpdatedBy")
+  commerceRefundRequests   OrderRefund[]         @relation("CommerceRefundRequester")
+  shippingLabelRequests    ShippingLabel[]       @relation("ShippingLabelRequester")
+  stockAdjustments         StockAuditLog[]       @relation("StockAdjustedBy")
 }
 
 model Otp {
@@ -208,11 +208,11 @@ model Otp {
 }
 
 model Training {
-  id                  String          @id @default(uuid())
+  id                  String           @id @default(uuid())
   type                TrainingType
   brand               TrainingBrand
   level               TrainingLevel
-  learningFormats     Json            // String[] — validated values: "DEMO" | "DIDACTIC" | "DISCUSSION"
+  learningFormats     Json // String[] — validated values: "DEMO" | "DIDACTIC" | "DISCUSSION"
   title               String
   speaker             String
   speakerIntro        String
@@ -221,20 +221,20 @@ model Training {
   areasCovered        String
   description         String
   backgroundImagePath String?
-  location            String?         // e.g. "Morristown, NJ"
-  scheduledAt         DateTime?       // When the training is scheduled
-  price               Int             // USD — auto-populated from level at creation
-  creditScore         Int             // In-house currency earned on enrollment — auto-populated from level
-  subOptions          Json?           // nullable — only for MINT_LIFT_GROUP_TRAINING
-  status              TrainingStatus  @default(ACTIVE)
-  maxEnrollees        Int             @default(4)
-  maxObservers        Int             @default(2)
-  observerPrice       Int             @default(500) // USD
+  location            String? // e.g. "Morristown, NJ"
+  scheduledAt         DateTime? // When the training is scheduled
+  price               Int // USD — auto-populated from level at creation
+  creditScore         Int // In-house currency earned on enrollment — auto-populated from level
+  subOptions          Json? // nullable — only for MINT_LIFT_GROUP_TRAINING
+  status              TrainingStatus   @default(ACTIVE)
+  maxEnrollees        Int              @default(4)
+  maxObservers        Int              @default(2)
+  observerPrice       Int              @default(500) // USD
   cancelledAt         DateTime?
-  cancelledBy         String?         // admin userId
-  createdBy           String          // admin userId
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
+  cancelledBy         String? // admin userId
+  createdBy           String // admin userId
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
   enrollments         Enrollment[]
   folders             TrainingFolder[]
 }
@@ -251,7 +251,7 @@ model Enrollment {
   paymentStatus         PaymentStatus  @default(PENDING)
   stripePaymentIntentId String?
   stripeRefundId        String?
-  paidAmount            Int?           // USD dollars
+  paidAmount            Int? // USD dollars
   paidAt                DateTime?
   refundedAt            DateTime?
   enrolledAt            DateTime       @default(now())
@@ -264,9 +264,9 @@ model CreditTransaction {
   userId      String
   user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   type        CreditTransactionType
-  amount      Int                   // Always positive — type determines direction
-  description String                // Human-readable e.g. "Enrolled in Advanced PDO Thread Techniques"
-  referenceId String?               // Optional — trainingId, orderId, etc.
+  amount      Int // Always positive — type determines direction
+  description String // Human-readable e.g. "Enrolled in Advanced PDO Thread Techniques"
+  referenceId String? // Optional — trainingId, orderId, etc.
   createdAt   DateTime              @default(now())
 }
 
@@ -294,6 +294,7 @@ model Product {
   fdaCleared           Boolean          @default(false)
   securePackaging      Boolean          @default(false)
   groundShippingOnly   Boolean          @default(false)
+  weightLbs            Float?
   stripeProductId      String?
   stripeDefaultPriceId String?
   createdAt            DateTime         @default(now())
@@ -338,53 +339,56 @@ model ProductImage {
 }
 
 model Order {
-  id                    String                  @id @default(uuid())
-  orderNumber           String                  @unique
-  userId                String?
-  user                  User?                   @relation("CommerceCustomerOrders", fields: [userId], references: [id], onDelete: SetNull)
-  customerName          String
-  customerEmail         String
-  customerPhone         String?
-  shippingAddress1      String?
-  shippingAddress2      String?
-  shippingCity          String?
-  shippingState         String?
-  shippingZipCode       String?
-  shippingCountry       String?
-  subtotalCents         Int
-  shippingFeeCents      Int                     @default(0)
-  taxCents              Int                     @default(0)
-  totalAmountCents      Int
-  currency              String                  @default("USD")
-  status                CommerceOrderStatus     @default(PENDING)
-  paymentStatus         CommercePaymentStatus   @default(PENDING)
-  verificationStatus    OrderVerificationStatus @default(PENDING)
-  fulfillmentStatus     FulfillmentStatus       @default(UNFULFILLED)
-  deliveryStatus        DeliveryStatus          @default(NOT_APPLICABLE)
-  shippingMethod        ShippingMethod?
-  trackingNumber        String?
-  courierName           String?
-  trackingUrl           String?
-  notes                 String?
-  cancellationReason    String?
-  cancellationNote      String?
-  stripePaymentIntentId String?                 @unique
-  stripeCheckoutId      String?
-  paidAt                DateTime?
-  verifiedAt            DateTime?
-  verifiedById          String?
-  verifiedBy            User?                   @relation("CommerceOrderVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
-  cancelledAt           DateTime?
-  refundedAt            DateTime?
-  shippedAt             DateTime?
-  deliveredAt           DateTime?
-  archivedAt            DateTime?
-  createdAt             DateTime                @default(now())
-  updatedAt             DateTime                @updatedAt
-  items                 OrderItem[]
-  statusHistory         OrderStatusHistory[]
-  refunds               OrderRefund[]
-  shippingLabels        ShippingLabel[]
+  id                        String                  @id @default(uuid())
+  orderNumber               String                  @unique
+  userId                    String?
+  user                      User?                   @relation("CommerceCustomerOrders", fields: [userId], references: [id], onDelete: SetNull)
+  customerName              String
+  customerEmail             String
+  customerPhone             String?
+  shippingAddress1          String?
+  shippingAddress2          String?
+  shippingCity              String?
+  shippingState             String?
+  shippingZipCode           String?
+  shippingCountry           String?
+  subtotalCents             Int
+  shippingFeeCents          Int                     @default(0)
+  taxCents                  Int                     @default(0)
+  totalAmountCents          Int
+  currency                  String                  @default("USD")
+  status                    CommerceOrderStatus     @default(PENDING)
+  paymentStatus             CommercePaymentStatus   @default(PENDING)
+  verificationStatus        OrderVerificationStatus @default(PENDING)
+  fulfillmentStatus         FulfillmentStatus       @default(UNFULFILLED)
+  deliveryStatus            DeliveryStatus          @default(NOT_APPLICABLE)
+  shippingMethod            ShippingMethod?
+  trackingNumber            String?
+  courierName               String?
+  trackingUrl               String?
+  notes                     String?
+  cancellationReason        String?
+  cancellationNote          String?
+  cancellationRequested     Boolean                 @default(false)
+  cancellationRequestedAt   DateTime?
+  cancellationRequestReason String?
+  stripePaymentIntentId     String?                 @unique
+  stripeCheckoutId          String?
+  paidAt                    DateTime?
+  verifiedAt                DateTime?
+  verifiedById              String?
+  verifiedBy                User?                   @relation("CommerceOrderVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
+  cancelledAt               DateTime?
+  refundedAt                DateTime?
+  shippedAt                 DateTime?
+  deliveredAt               DateTime?
+  archivedAt                DateTime?
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+  items                     OrderItem[]
+  statusHistory             OrderStatusHistory[]
+  refunds                   OrderRefund[]
+  shippingLabels            ShippingLabel[]
 
   @@index([userId])
   @@index([status])
@@ -392,6 +396,7 @@ model Order {
   @@index([verificationStatus])
   @@index([createdAt])
   @@index([archivedAt])
+  @@index([cancellationRequested])
 }
 
 model OrderItem {
@@ -504,12 +509,12 @@ model Appointment {
   medUser         User              @relation("MedAppointments", fields: [medUserId], references: [id], onDelete: Cascade)
   salesRepId      String?
   salesRep        User?             @relation("SalesRepAppointments", fields: [salesRepId], references: [id], onDelete: SetNull)
-  date            String            // "YYYY-MM-DD" e.g. "2026-03-18"
-  time            String            // e.g. "10:00 AM"
-  notes           String?           // Optional context from MED user
+  date            String // "YYYY-MM-DD" e.g. "2026-03-18"
+  time            String // e.g. "10:00 AM"
+  notes           String? // Optional context from MED user
   status          AppointmentStatus @default(PENDING)
-  zoomLink        String?           // Filled on approval from ZOOM_MEETING_LINK env var
-  rejectionReason String?           // Filled on rejection — also sent as email
+  zoomLink        String? // Filled on approval from ZOOM_MEETING_LINK env var
+  rejectionReason String? // Filled on rejection — also sent as email
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 }
@@ -551,22 +556,22 @@ model TrainingDocument {
 // ─── Before & After ───────────────────────────────────────────────────────────
 
 model BeforeAndAfterEntry {
-  id          String                 @id @default(uuid())
+  id          String                @id @default(uuid())
   userId      String
-  user        User                   @relation("UserBAEntries", fields: [userId], references: [id], onDelete: Cascade)
+  user        User                  @relation("UserBAEntries", fields: [userId], references: [id], onDelete: Cascade)
   title       String
   description String
   media       BeforeAndAfterMedia[]
-  createdAt   DateTime               @default(now())
-  updatedAt   DateTime               @updatedAt
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
 }
 
 model BeforeAndAfterMedia {
   id       String              @id @default(uuid())
   entryId  String
   entry    BeforeAndAfterEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
-  section  MediaSection        // BEFORE or AFTER
-  label    String              // e.g. "Left Side Face", "Center Face", "Right Side Face"
+  section  MediaSection // BEFORE or AFTER
+  label    String // e.g. "Left Side Face", "Center Face", "Right Side Face"
   filePath String
 }
 
@@ -612,21 +617,21 @@ model ContestLike {
 // ─── Popup Ads ────────────────────────────────────────────────────────────────
 
 model AdConfig {
-  id              String     @id @default(uuid())
-  isActive        Boolean    @default(true)
-  intervalSeconds Int        @default(3)
+  id              String    @id @default(uuid())
+  isActive        Boolean   @default(true)
+  intervalSeconds Int       @default(3)
   slides          AdSlide[]
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }
 
 model AdSlide {
-  id          String    @id @default(uuid())
+  id          String   @id @default(uuid())
   adConfigId  String
-  adConfig    AdConfig  @relation(fields: [adConfigId], references: [id], onDelete: Cascade)
+  adConfig    AdConfig @relation(fields: [adConfigId], references: [id], onDelete: Cascade)
   imageUrl    String
-  redirectUrl String    @default("")
-  createdAt   DateTime  @default(now())
+  redirectUrl String   @default("")
+  createdAt   DateTime @default(now())
 
   @@index([adConfigId])
 }
@@ -645,18 +650,18 @@ enum DiscountApplicableTo {
 }
 
 model DiscountCode {
-  id            String               @id @default(uuid())
-  code          String               @unique
-  type          DiscountType
-  value         Float
-  applicableTo  DiscountApplicableTo @default(BOTH)
-  maxUses       Int?
-  usedCount     Int                  @default(0)
-  expiresAt     DateTime?
-  isActive      Boolean              @default(true)
-  createdBy     String
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
+  id           String               @id @default(uuid())
+  code         String               @unique
+  type         DiscountType
+  value        Float
+  applicableTo DiscountApplicableTo @default(BOTH)
+  maxUses      Int?
+  usedCount    Int                  @default(0)
+  expiresAt    DateTime?
+  isActive     Boolean              @default(true)
+  createdBy    String
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
 
   @@index([code])
   @@index([isActive])

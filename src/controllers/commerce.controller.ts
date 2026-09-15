@@ -311,6 +311,26 @@ export async function refundOrder(req: Request, res: Response) {
   }
 }
 
+export async function approveCancellationRequest(req: Request, res: Response) {
+  try {
+    const adminId = (req as any).userId as string;
+    const data = await commerceService.approveCancellationRequest(param(req.params.id), adminId, req.body?.note);
+    res.json({ success: true, data });
+  } catch (err) {
+    sendError(res, err, "approveCancellationRequest", 400);
+  }
+}
+
+export async function declineCancellationRequest(req: Request, res: Response) {
+  try {
+    const adminId = (req as any).userId as string;
+    const data = await commerceService.declineCancellationRequest(param(req.params.id), adminId, req.body?.note);
+    res.json({ success: true, data });
+  } catch (err) {
+    sendError(res, err, "declineCancellationRequest", 400);
+  }
+}
+
 export async function archiveOrder(req: Request, res: Response) {
   try {
     const adminId = (req as any).userId as string;
@@ -440,6 +460,16 @@ export async function createShippingLabel(req: Request, res: Response) {
   }
 }
 
+export async function generateUpsShippingLabel(req: Request, res: Response) {
+  try {
+    const adminId = (req as any).userId as string;
+    const data = await commerceService.generateUpsShippingLabel(param(req.params.id), adminId);
+    res.status(201).json({ success: true, data });
+  } catch (err) {
+    sendError(res, err, "generateUpsShippingLabel", 400);
+  }
+}
+
 export async function markShippingLabelPrinted(req: Request, res: Response) {
   try {
     const adminId = (req as any).userId as string;
@@ -501,5 +531,15 @@ export async function getMyOrderById(req: Request, res: Response) {
     res.json({ success: true, data });
   } catch (err) {
     sendError(res, err, "getCommerceOrderById", 404);
+  }
+}
+
+export async function requestOrderCancellation(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId as string;
+    const data = await commerceService.requestOrderCancellation(param(req.params.id), userId, req.body?.reason);
+    res.json({ success: true, data });
+  } catch (err) {
+    sendError(res, err, "requestOrderCancellation", 400);
   }
 }

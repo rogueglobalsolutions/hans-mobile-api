@@ -12,5 +12,6 @@ router.post("/create-intent", commerceController.createProductOrderIntent);
 router.post("/confirm", commerceController.confirmProductOrderPayment);
 router.get("/my", commerceController.getMyOrders);
 router.get("/:id", commerceController.getMyOrderById);
+router.post("/:id/request-cancellation", commerceController.requestOrderCancellation);
 
 export default router;

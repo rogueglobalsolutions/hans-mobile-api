@@ -94,9 +94,12 @@ router.patch("/commerce/orders/:id/tracking", commerceController.updateOrderTrac
 router.post("/commerce/orders/:id/verify", commerceController.verifyOrder);
 router.post("/commerce/orders/:id/cancel", commerceController.cancelOrder);
 router.post("/commerce/orders/:id/refund", commerceController.refundOrder);
+router.post("/commerce/orders/:id/cancellation/approve", commerceController.approveCancellationRequest);
+router.post("/commerce/orders/:id/cancellation/decline", commerceController.declineCancellationRequest);
 router.post("/commerce/orders/:id/archive", commerceController.archiveOrder);
 router.post("/commerce/orders/:id/duplicate", commerceController.duplicateOrder);
 router.post("/commerce/orders/:id/shipping-labels", commerceController.createShippingLabel);
+router.post("/commerce/orders/:id/shipping-labels/ups", commerceController.generateUpsShippingLabel);
 
 router.get("/commerce/shipping-labels", commerceController.getShippingLabels);
 router.get("/commerce/shipping-labels/:id", commerceController.getShippingLabelById);

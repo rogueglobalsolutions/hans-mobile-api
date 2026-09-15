@@ -3,6 +3,8 @@ import path from "path";
 import prisma from "../config/prisma";
 import { stripe } from "../config/stripe";
 import { syncProductToJson } from "./productJsonSync.service";
+import { UPS_DEFAULT_PACKAGE_WEIGHT_LBS } from "../config/ups";
+import * as upsService from "./ups.service";
 import {
   AccountStatus,
   CommerceOrderStatus,
@@ -169,7 +171,12 @@ function dashboardOrderStatus(order: { status: CommerceOrderStatus }) {
   return order.status;
 }
 
-function medOrderStatus(order: { status: CommerceOrderStatus; paymentStatus: CommercePaymentStatus }) {
+function medOrderStatus(order: {
+  status: CommerceOrderStatus;
+  paymentStatus: CommercePaymentStatus;
+  cancellationRequested?: boolean;
+}) {
+  if (order.cancellationRequested) return "Cancellation Requested";
   if (order.paymentStatus === CommercePaymentStatus.PENDING) return "Pending Payment";
   if (order.status === CommerceOrderStatus.DELIVERED) return "Completed";
   return order.status.charAt(0) + order.status.slice(1).toLowerCase();
@@ -290,6 +297,9 @@ function formatOrderSummary(order: any) {
     trackingUrl: order.trackingUrl,
     createdAt: order.createdAt,
     paidAt: order.paidAt,
+    cancellationRequested: order.cancellationRequested,
+    cancellationRequestedAt: order.cancellationRequestedAt,
+    cancellationRequestReason: order.cancellationRequestReason,
   };
 }
 
@@ -331,7 +341,8 @@ function formatOrderDetail(order: any) {
 }
 
 function buildOrderWhere(filters: OrderFilters = {}, userId?: string) {
-  const status = normalizeOrderStatus(filters.status);
+  const isCancellationRequestedFilter = filters.status?.toLowerCase() === "cancellation_requested";
+  const status = isCancellationRequestedFilter ? null : normalizeOrderStatus(filters.status);
   const createdAt = dateWhere(filters);
   const search = filters.search?.trim();
   const isRefundedFilter = filters.status?.toLowerCase() === "refunded";
@@ -340,6 +351,7 @@ function buildOrderWhere(filters: OrderFilters = {}, userId?: string) {
     ...(userId ? { userId } : {}),
     ...(filters.includeArchived ? {} : { archivedAt: null }),
     ...(status ? { status } : {}),
+    ...(isCancellationRequestedFilter ? { cancellationRequested: true } : {}),
     ...(isRefundedFilter
       ? { paymentStatus: { in: [CommercePaymentStatus.REFUNDED, CommercePaymentStatus.PARTIALLY_REFUNDED] } }
       : {}),
@@ -1074,6 +1086,97 @@ export async function refundOrder(orderId: string, adminId: string, input: any =
   return getOrderById(orderId);
 }
 
+export async function requestOrderCancellation(orderId: string, userId: string, reason?: string) {
+  const order = await prisma.order.findFirst({ where: { id: orderId, userId } });
+  if (!order) throw new Error("Order not found");
+  if (order.status !== CommerceOrderStatus.PENDING && order.status !== CommerceOrderStatus.PROCESSING) {
+    throw new Error("This order can no longer be cancelled — it has already shipped, been delivered, or was cancelled.");
+  }
+  if (order.cancellationRequested) throw new Error("A cancellation request is already pending for this order.");
+
+  await prisma.$transaction(async (tx) => {
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        cancellationRequested: true,
+        cancellationRequestedAt: new Date(),
+        cancellationRequestReason: reason || null,
+      },
+    });
+    await tx.orderStatusHistory.create({
+      data: {
+        orderId,
+        updatedById: userId,
+        action: "cancellation_requested",
+        note: reason || null,
+      },
+    });
+  });
+
+  return getOrderById(orderId, userId);
+}
+
+export async function approveCancellationRequest(orderId: string, adminId: string, note?: string) {
+  const order = await prisma.order.findUnique({ where: { id: orderId } });
+  if (!order) throw new Error("Order not found");
+  if (!order.cancellationRequested) throw new Error("No pending cancellation request for this order.");
+
+  await prisma.$transaction(async (tx) => {
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        status: CommerceOrderStatus.CANCELLED,
+        cancelledAt: new Date(),
+        cancellationReason: "Cancellation request approved",
+        cancellationNote: note || null,
+        cancellationRequested: false,
+      },
+    });
+    await tx.orderStatusHistory.create({
+      data: {
+        orderId,
+        updatedById: adminId,
+        action: "cancellation_approved",
+        note: note || null,
+        status: CommerceOrderStatus.CANCELLED,
+      },
+    });
+  });
+
+  const isRefundable =
+    !!order.stripePaymentIntentId &&
+    (order.paymentStatus === CommercePaymentStatus.PAID ||
+      order.paymentStatus === CommercePaymentStatus.PARTIALLY_REFUNDED);
+  if (isRefundable) {
+    return refundOrder(orderId, adminId, { reason: "Refund for approved cancellation" });
+  }
+
+  return getOrderById(orderId);
+}
+
+export async function declineCancellationRequest(orderId: string, adminId: string, note?: string) {
+  const order = await prisma.order.findUnique({ where: { id: orderId } });
+  if (!order) throw new Error("Order not found");
+  if (!order.cancellationRequested) throw new Error("No pending cancellation request for this order.");
+
+  await prisma.$transaction(async (tx) => {
+    await tx.order.update({
+      where: { id: orderId },
+      data: { cancellationRequested: false },
+    });
+    await tx.orderStatusHistory.create({
+      data: {
+        orderId,
+        updatedById: adminId,
+        action: "cancellation_declined",
+        note: note || null,
+      },
+    });
+  });
+
+  return getOrderById(orderId);
+}
+
 export async function archiveOrder(orderId: string, adminId: string, note?: string) {
   const order = await prisma.$transaction(async (tx) => {
     const updated = await tx.order.update({
@@ -1502,6 +1605,88 @@ export async function createShippingLabel(orderId: string, adminId: string, inpu
   return label;
 }
 
+const SHIPPING_LABELS_DIR = path.join(process.cwd(), "uploads", "shipping-labels");
+
+// Calls the UPS Shipping API to actually book the shipment and generate a
+// label + tracking number, then records it the same way createShippingLabel
+// does (manual entry). Unlike the manual path, everything here comes from UPS.
+export async function generateUpsShippingLabel(orderId: string, adminId: string) {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { items: { include: { product: true } } },
+  });
+  if (!order) throw new Error("Order not found");
+
+  if (!order.shippingAddress1 || !order.shippingCity || !order.shippingState || !order.shippingZipCode) {
+    throw new Error("Shipping address is incomplete");
+  }
+
+  const totalWeightLbs = order.items.reduce(
+    (sum, item) => sum + (item.product?.weightLbs ?? UPS_DEFAULT_PACKAGE_WEIGHT_LBS) * item.quantity,
+    0,
+  );
+
+  const shipment = await upsService.createGroundShipment(
+    {
+      name: order.customerName,
+      phone: order.customerPhone || undefined,
+      address1: order.shippingAddress1,
+      address2: order.shippingAddress2,
+      city: order.shippingCity,
+      state: order.shippingState,
+      zipCode: order.shippingZipCode,
+      country: order.shippingCountry,
+    },
+    totalWeightLbs,
+  );
+
+  fs.mkdirSync(SHIPPING_LABELS_DIR, { recursive: true });
+  const labelFilename = `${order.orderNumber}-${Date.now()}.gif`;
+  fs.writeFileSync(path.join(SHIPPING_LABELS_DIR, labelFilename), Buffer.from(shipment.labelBase64, "base64"));
+  const labelUrl = `uploads/shipping-labels/${labelFilename}`;
+
+  const label = await prisma.$transaction(async (tx) => {
+    const created = await tx.shippingLabel.create({
+      data: {
+        orderId,
+        status: ShippingLabelStatus.CREATED,
+        shippingMethod: ShippingMethod.GROUND,
+        carrier: "UPS",
+        serviceCode: shipment.serviceCode,
+        trackingNumber: shipment.trackingNumber,
+        trackingUrl: shipment.trackingUrl,
+        labelUrl,
+        labelFormat: shipment.labelFormat,
+        shipmentId: shipment.shipmentId,
+        costCents: shipment.amountUsd != null ? fromDollars(shipment.amountUsd) : null,
+        requestedById: adminId,
+      },
+    });
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        deliveryStatus: DeliveryStatus.LABEL_CREATED,
+        trackingNumber: shipment.trackingNumber,
+        trackingUrl: shipment.trackingUrl,
+        courierName: "UPS",
+        shippingMethod: ShippingMethod.GROUND,
+      },
+    });
+    await tx.orderStatusHistory.create({
+      data: {
+        orderId,
+        updatedById: adminId,
+        action: "ups_shipping_label_create",
+        deliveryStatus: DeliveryStatus.LABEL_CREATED,
+        note: `UPS tracking ${shipment.trackingNumber}`,
+      },
+    });
+    return created;
+  });
+
+  return label;
+}
+
 export async function markShippingLabelPrinted(labelId: string, adminId: string) {
   const label = await prisma.shippingLabel.update({
     where: { id: labelId },
@@ -1534,6 +1719,7 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
 
   const orderItems = [];
   let subtotalCents = 0;
+  let totalWeightLbs = 0;
 
   for (const requested of requestedItems) {
     const quantity = Math.max(1, Number(requested.quantity) || 1);
@@ -1559,6 +1745,7 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
     const unitPriceCents = stripePrice.unit_amount;
     const lineTotalCents = unitPriceCents * quantity;
     subtotalCents += lineTotalCents;
+    totalWeightLbs += (product.weightLbs ?? UPS_DEFAULT_PACKAGE_WEIGHT_LBS) * quantity;
     orderItems.push({
       productId: product.id,
       variantId: variant?.id ?? null,
@@ -1571,8 +1758,32 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
     });
   }
 
+  const shippingAddress1 = input.shippingAddress1 ?? user.practiceAddressLine1 ?? user.address ?? null;
+  const shippingAddress2 = input.shippingAddress2 ?? user.practiceAddressLine2 ?? null;
+  const shippingCity = input.shippingCity ?? user.practiceCity ?? user.city ?? null;
+  const shippingState = input.shippingState ?? user.practiceState ?? user.stateProvince ?? null;
+  const shippingZipCode = input.shippingZipCode ?? user.practiceZipCode ?? user.zipCode ?? null;
+  const shippingCountry = input.shippingCountry ?? user.practiceCountry ?? user.country ?? null;
+
+  if (!shippingAddress1 || !shippingCity || !shippingState || !shippingZipCode) {
+    throw new Error("Shipping address is incomplete");
+  }
+
+  const rate = await upsService.getGroundRate(
+    {
+      address1: shippingAddress1,
+      address2: shippingAddress2,
+      city: shippingCity,
+      state: shippingState,
+      zipCode: shippingZipCode,
+      country: shippingCountry,
+    },
+    totalWeightLbs,
+  );
+  const shippingFeeCents = Math.round(rate.amountUsd * 100);
+
   const orderNumber = await getNextOrderNumber();
-  const totalAmountCents = subtotalCents;
+  const totalAmountCents = subtotalCents + shippingFeeCents;
   const order = await prisma.order.create({
     data: {
       orderNumber,
@@ -1580,14 +1791,15 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
       customerName: user.fullName,
       customerEmail: user.email,
       customerPhone: user.phoneNumber,
-      shippingAddress1: input.shippingAddress1 ?? user.practiceAddressLine1 ?? user.address ?? null,
-      shippingAddress2: input.shippingAddress2 ?? user.practiceAddressLine2 ?? null,
-      shippingCity: input.shippingCity ?? user.practiceCity ?? user.city ?? null,
-      shippingState: input.shippingState ?? user.practiceState ?? user.stateProvince ?? null,
-      shippingZipCode: input.shippingZipCode ?? user.practiceZipCode ?? user.zipCode ?? null,
-      shippingCountry: input.shippingCountry ?? user.practiceCountry ?? user.country ?? null,
-      shippingMethod: input.shippingMethod,
+      shippingAddress1,
+      shippingAddress2,
+      shippingCity,
+      shippingState,
+      shippingZipCode,
+      shippingCountry,
+      shippingMethod: input.shippingMethod ?? ShippingMethod.GROUND,
       subtotalCents,
+      shippingFeeCents,
       totalAmountCents,
       notes: input.notes ?? null,
       items: { create: orderItems },
@@ -1614,6 +1826,8 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
       orderId: order.id,
       orderNumber: order.orderNumber,
       amountUsd: toDollars(totalAmountCents),
+      subtotalUsd: toDollars(subtotalCents),
+      shippingFeeUsd: toDollars(shippingFeeCents),
     };
   } catch (error) {
     await prisma.order.delete({ where: { id: order.id } }).catch(() => undefined);
