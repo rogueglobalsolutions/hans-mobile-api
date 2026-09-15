@@ -459,6 +459,7 @@ model OrderRefund {
 
 model ShippingLabel {
   id             String              @id @default(uuid())
+  activeKey      String?             @unique
   orderId        String
   order          Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
   status         ShippingLabelStatus @default(PENDING)
@@ -472,6 +473,7 @@ model ShippingLabel {
   shipmentId     String?
   rateId         String?
   costCents      Int?
+  errorMessage   String?
   currency       String              @default("USD")
   requestedById  String?
   requestedBy    User?               @relation("ShippingLabelRequester", fields: [requestedById], references: [id], onDelete: SetNull)

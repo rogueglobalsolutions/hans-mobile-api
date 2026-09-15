@@ -500,6 +500,26 @@ export async function createProductOrderIntent(req: Request, res: Response) {
   }
 }
 
+export async function getProductCheckoutProfile(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId as string;
+    const data = await commerceService.getProductCheckoutProfile(userId);
+    res.json({ success: true, data });
+  } catch (err) {
+    sendError(res, err, "getProductCheckoutProfile", 400);
+  }
+}
+
+export async function quoteProductOrder(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId as string;
+    const data = await commerceService.quoteProductOrder(userId, req.body);
+    res.json({ success: true, data });
+  } catch (err) {
+    sendError(res, err, "quoteProductOrder", 400);
+  }
+}
+
 export async function confirmProductOrderPayment(req: Request, res: Response) {
   try {
     const userId = (req as any).userId as string;
@@ -511,6 +531,20 @@ export async function confirmProductOrderPayment(req: Request, res: Response) {
     res.json({ success: true, data });
   } catch (err) {
     sendError(res, err, "confirmProductOrderPayment", 400);
+  }
+}
+
+export async function discardProductOrderIntent(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId as string;
+    if (!req.body.paymentIntentId) {
+      res.status(400).json({ success: false, message: "paymentIntentId is required" });
+      return;
+    }
+    const data = await commerceService.discardProductOrderIntent(userId, req.body.paymentIntentId);
+    res.json({ success: true, data });
+  } catch (err) {
+    sendError(res, err, "discardProductOrderIntent", 400);
   }
 }
 

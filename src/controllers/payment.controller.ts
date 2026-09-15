@@ -1,7 +1,17 @@
 import { Request, Response } from "express";
 import { stripe } from "../config/stripe";
 import * as trainingService from "../services/training.service";
+import * as commerceService from "../services/commerce.service";
 import { sanitizeError } from "../utils/errors";
+import type Stripe from "stripe";
+
+function paymentKind(paymentIntent: Stripe.PaymentIntent) {
+  if (paymentIntent.metadata?.orderId || paymentIntent.metadata?.kind === "product_order") {
+    return "product_order";
+  }
+  if (paymentIntent.metadata?.trainingId) return "training_enrollment";
+  return "unknown";
+}
 
 export async function getConfig(req: Request, res: Response) {
   res.json({
@@ -89,12 +99,27 @@ export async function handleWebhook(req: Request, res: Response) {
   }
   try {
     if (event.type === "payment_intent.succeeded") {
-      const paymentIntent = event.data.object as any;
-      await trainingService.confirmEnrollmentPayment(paymentIntent.id);
+      const paymentIntent = event.data.object as Stripe.PaymentIntent;
+      const kind = paymentKind(paymentIntent);
+      if (kind === "product_order") {
+        await commerceService.confirmProductOrderPaymentFromWebhook(paymentIntent);
+      } else if (kind === "training_enrollment") {
+        await trainingService.confirmEnrollmentPayment(paymentIntent.id);
+      } else {
+        console.warn(`[stripe.webhook] Ignoring unrecognized PaymentIntent ${paymentIntent.id}`);
+      }
     }
     if (event.type === "payment_intent.payment_failed" || event.type === "payment_intent.canceled") {
-      const paymentIntent = event.data.object as any;
-      await trainingService.failEnrollment(paymentIntent.id);
+      const paymentIntent = event.data.object as Stripe.PaymentIntent;
+      const kind = paymentKind(paymentIntent);
+      if (kind === "product_order") {
+        await commerceService.failProductOrderPaymentFromWebhook(
+          paymentIntent.id,
+          event.type === "payment_intent.canceled",
+        );
+      } else if (kind === "training_enrollment") {
+        await trainingService.failEnrollment(paymentIntent.id);
+      }
     }
     res.json({ received: true });
   } catch (err) {

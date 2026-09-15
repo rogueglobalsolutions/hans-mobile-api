@@ -6,11 +6,13 @@ import {
   UPS_SHIPPER,
   isUpsConfigured,
 } from "../config/ups";
+import { getCountries, getStatesOfCountry } from "@countrystatecity/countries";
 
 // UPS OAuth 2.0 "Client Credentials" grant. The token is short-lived (a few
 // hours) and shared across requests, so we cache it in memory instead of
 // fetching a new one on every rate lookup.
 let cachedToken: { value: string; expiresAt: number } | null = null;
+const SHIPPING_API_VERSION = "v2409";
 
 async function getAccessToken(): Promise<string> {
   if (cachedToken && cachedToken.expiresAt > Date.now() + 30_000) {
@@ -53,6 +55,27 @@ export interface ShippingAddress {
   country?: string | null;
 }
 
+async function normalizeDestinationAddress<T extends ShippingAddress>(destination: T) {
+  const countryInput = (destination.country || "US").trim();
+  const countries = await getCountries();
+  const country = countries.find(
+    (item) => item.iso2.toLowerCase() === countryInput.toLowerCase() ||
+      item.name.toLowerCase() === countryInput.toLowerCase(),
+  );
+  if (!country) throw new Error("Shipping country is invalid");
+  if (country.iso2 !== "US") throw new Error("UPS Ground shipping is currently limited to US addresses");
+
+  const stateInput = destination.state.trim();
+  const states = await getStatesOfCountry(country.iso2);
+  const state = states.find(
+    (item) => item.iso2.toLowerCase() === stateInput.toLowerCase() ||
+      item.name.toLowerCase() === stateInput.toLowerCase(),
+  );
+  if (!state) throw new Error("Shipping state is invalid");
+
+  return { ...destination, country: country.iso2, state: state.iso2 };
+}
+
 export interface RateQuote {
   serviceCode: string;
   serviceName: string;
@@ -70,6 +93,7 @@ export async function getGroundRate(destination: ShippingAddress, weightLbs: num
   }
 
   const token = await getAccessToken();
+  const normalizedDestination = await normalizeDestinationAddress(destination);
   const transactionId = `hans-${Date.now()}`;
 
   const requestBody = {
@@ -101,11 +125,11 @@ export async function getGroundRate(destination: ShippingAddress, weightLbs: num
         },
         ShipTo: {
           Address: {
-            AddressLine: [destination.address1, destination.address2 || ""].filter(Boolean),
-            City: destination.city,
-            StateProvinceCode: destination.state,
-            PostalCode: destination.zipCode,
-            CountryCode: destination.country || "US",
+            AddressLine: [normalizedDestination.address1, normalizedDestination.address2 || ""].filter(Boolean),
+            City: normalizedDestination.city,
+            StateProvinceCode: normalizedDestination.state,
+            PostalCode: normalizedDestination.zipCode,
+            CountryCode: normalizedDestination.country,
           },
         },
         Service: { Code: GROUND_SERVICE_CODE, Description: "Ground" },
@@ -187,6 +211,7 @@ export async function createGroundShipment(
   }
 
   const token = await getAccessToken();
+  const normalizedDestination = await normalizeDestinationAddress(destination);
   const transactionId = `hans-${Date.now()}`;
 
   const requestBody = {
@@ -221,14 +246,14 @@ export async function createGroundShipment(
           },
         },
         ShipTo: {
-          Name: destination.name || "Customer",
-          Phone: destination.phone ? { Number: destination.phone } : undefined,
+          Name: normalizedDestination.name || "Customer",
+          Phone: normalizedDestination.phone ? { Number: normalizedDestination.phone } : undefined,
           Address: {
-            AddressLine: [destination.address1, destination.address2 || ""].filter(Boolean),
-            City: destination.city,
-            StateProvinceCode: destination.state,
-            PostalCode: destination.zipCode,
-            CountryCode: destination.country || "US",
+            AddressLine: [normalizedDestination.address1, normalizedDestination.address2 || ""].filter(Boolean),
+            City: normalizedDestination.city,
+            StateProvinceCode: normalizedDestination.state,
+            PostalCode: normalizedDestination.zipCode,
+            CountryCode: normalizedDestination.country,
           },
         },
         PaymentInformation: {
@@ -257,7 +282,7 @@ export async function createGroundShipment(
     },
   };
 
-  const response = await fetch(`${UPS_BASE_URL}/api/shipments/v1/ship`, {
+  const response = await fetch(`${UPS_BASE_URL}/api/shipments/${SHIPPING_API_VERSION}/ship`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -297,4 +322,38 @@ export async function createGroundShipment(
     labelFormat: "GIF",
     labelBase64: packageResult.ShippingLabel.GraphicImage as string,
   };
+}
+
+// UPS must accept the cancellation before callers change local label state.
+export async function voidShipment(shipmentId: string, trackingNumber?: string | null): Promise<void> {
+  if (!isUpsConfigured()) {
+    throw new Error("UPS is not configured");
+  }
+  if (!shipmentId.trim()) {
+    throw new Error("UPS shipment identifier is missing");
+  }
+
+  const token = await getAccessToken();
+  const transactionId = `hans-${Date.now()}`;
+  const query = trackingNumber?.trim()
+    ? `?trackingnumber=${encodeURIComponent(trackingNumber.trim().toUpperCase())}`
+    : "";
+  const response = await fetch(
+    `${UPS_BASE_URL}/api/shipments/${SHIPPING_API_VERSION}/void/cancel/${encodeURIComponent(shipmentId.trim().toUpperCase())}${query}`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        transId: transactionId,
+        transactionSrc: "hans-mobile",
+      },
+    },
+  );
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    console.error("[ups.service] Shipment void failed:", response.status, text);
+    throw new Error("Unable to void UPS shipment");
+  }
 }

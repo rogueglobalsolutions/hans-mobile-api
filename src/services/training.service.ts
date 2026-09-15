@@ -396,18 +396,29 @@ export async function confirmEnrollmentPayment(paymentIntentId: string) {
     return { message: "Already confirmed", alreadyConfirmed: true };
   }
 
-  // ✅ Use creditScore from paymentIntent metadata (set during initiateEnrollment)
   const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  if (paymentIntent.status !== "succeeded") throw new Error("Payment has not succeeded");
+  if (
+    paymentIntent.currency.toLowerCase() !== "usd" ||
+    paymentIntent.amount_received !== Math.round((enrollment.paidAmount ?? 0) * 100)
+  ) {
+    throw new Error("Payment amount does not match enrollment");
+  }
+
   const creditScoreOverride = paymentIntent.metadata?.creditScore
     ? parseInt(paymentIntent.metadata.creditScore, 10)
     : null;
   const creditScore = creditScoreOverride ?? enrollment.training.creditScore;
 
-  await prisma.$transaction(async (tx) => {
-    await tx.enrollment.update({
-      where: { id: enrollment.id },
+  const finalized = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.enrollment.updateMany({
+      where: {
+        id: enrollment.id,
+        paymentStatus: { in: [PaymentStatus.PENDING, PaymentStatus.FAILED] },
+      },
       data: { paymentStatus: PaymentStatus.COMPLETED, paidAt: new Date() },
     });
+    if (claimed.count === 0) return false;
 
     if (enrollment.type === EnrollmentType.ENROLLEE && creditScore > 0) {
       await tx.creditTransaction.create({
@@ -424,7 +435,16 @@ export async function confirmEnrollmentPayment(paymentIntentId: string) {
         data:  { creditBalance: { increment: creditScore } },
       });
     }
+    return true;
   });
+
+  if (!finalized) {
+    const current = await prisma.enrollment.findUnique({ where: { id: enrollment.id } });
+    if (current?.paymentStatus === PaymentStatus.COMPLETED) {
+      return { message: "Already confirmed", alreadyConfirmed: true };
+    }
+    throw new Error("Enrollment payment could not be finalized");
+  }
 
   const discountCode = paymentIntent.metadata?.discountCode;
   if (discountCode) {

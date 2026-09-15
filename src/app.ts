@@ -13,6 +13,7 @@ import appointmentRoutes from "./routes/appointment.routes";
 import baRoutes from "./routes/ba.routes";
 import salesRepRoutes from "./routes/salesRep.routes";
 import paymentRoutes from "./routes/payment.routes";
+import * as paymentController from "./controllers/payment.controller";
 import locationRoutes from "./routes/location.routes";
 import productRoutes from "./routes/product.routes";
 import orderRoutes from "./routes/order.routes";
@@ -33,6 +34,15 @@ initSocket(server);
 // Middleware
 app.use(requestLogger);
 app.use(cors());
+
+// Stripe signature verification requires the untouched request bytes. Register
+// this endpoint before the global JSON parser so req.body remains a Buffer.
+app.post(
+  "/api/payments/webhook",
+  express.raw({ type: "application/json" }),
+  paymentController.handleWebhook,
+);
+
 app.use(express.json());
 
 // Serve uploaded files (ID documents, training background images, etc.)

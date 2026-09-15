@@ -5,6 +5,7 @@ import { stripe } from "../config/stripe";
 import { syncProductToJson } from "./productJsonSync.service";
 import { UPS_DEFAULT_PACKAGE_WEIGHT_LBS } from "../config/ups";
 import * as upsService from "./ups.service";
+import type Stripe from "stripe";
 import {
   AccountStatus,
   CommerceOrderStatus,
@@ -71,6 +72,7 @@ interface CreateOrderIntentInput {
   shippingCountry?: string;
   shippingMethod?: ShippingMethod;
   notes?: string;
+  expectedTotalAmountCents?: number;
 }
 
 const ORDER_NUMBER_PREFIX = "ORD";
@@ -371,8 +373,13 @@ function buildOrderWhere(filters: OrderFilters = {}, userId?: string) {
 async function getNextOrderNumber() {
   const date = new Date();
   const stamp = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
-  const countToday = await prisma.order.count({ where: { createdAt: { gte: startOfToday() } } });
-  return `${ORDER_NUMBER_PREFIX}-${stamp}-${String(countToday + 1).padStart(4, "0")}`;
+  const lastOrder = await prisma.order.findFirst({
+    where: { orderNumber: { startsWith: `${ORDER_NUMBER_PREFIX}-${stamp}-` } },
+    orderBy: { orderNumber: "desc" },
+    select: { orderNumber: true },
+  });
+  const lastSequence = Number(lastOrder?.orderNumber.split("-").at(-1)) || 0;
+  return `${ORDER_NUMBER_PREFIX}-${stamp}-${String(lastSequence + 1).padStart(4, "0")}`;
 }
 
 async function createStatusHistory(orderId: string, updatedById: string | null, action: string, data: any = {}) {
@@ -799,17 +806,9 @@ export async function getVendorCollections() {
   return collections.sort((a, b) => b.productCount - a.productCount);
 }
 
-/**
- * Inventory = a cross-product view built on top of the same stockQty the product edit
- * page calls "Stock quantity" (that's "On hand" here — same field, same value).
- * What's new is "Committed": quantity sitting in orders that are placed but not yet
- * fulfilled, computed live from real OrderItem/Order data. "Available" = On hand minus
- * Committed, i.e. what's actually left to sell right now.
- *
- * "Unavailable" and "Incoming" are always 0 — we don't yet track damaged/reserved stock
- * or open purchase orders (no schema for either), so those columns exist for layout
- * parity with the reference UI but carry no real signal yet.
- */
+// Product.stockQty is available-to-sell stock and is deducted when payment clears.
+// Committed units remain physically on hand until fulfillment, so on-hand stock is
+// available plus paid, unfulfilled units rather than subtracting them a second time.
 export async function getInventory() {
   const [products, committedRows] = await Promise.all([
     prisma.product.findMany({
@@ -822,6 +821,7 @@ export async function getInventory() {
         productId: { not: null },
         order: {
           status: { not: CommerceOrderStatus.CANCELLED },
+          paidAt: { not: null },
           fulfillmentStatus: { not: FulfillmentStatus.FULFILLED },
         },
       },
@@ -832,8 +832,9 @@ export async function getInventory() {
   const committedByProduct = new Map(committedRows.map((row) => [row.productId as string, row._sum.quantity ?? 0]));
 
   return products.map((product) => {
-    const onHand = product.stockQty;
+    const available = product.stockQty;
     const committed = committedByProduct.get(product.id) ?? 0;
+    const onHand = available + committed;
     return {
       id: product.id,
       name: product.name,
@@ -841,11 +842,36 @@ export async function getInventory() {
       imageUrl: formatProduct(product).imageUrl,
       unavailable: 0,
       committed,
-      available: onHand - committed,
+      available,
       onHand,
       incoming: 0,
     };
   });
+}
+
+async function restoreCancelledOrderStock(tx: any, order: { paidAt: Date | null; items: any[] }) {
+  if (!order.paidAt) return;
+
+  const productQuantities = new Map<string, number>();
+  const variantQuantities = new Map<string, number>();
+  for (const item of order.items) {
+    if (item.productId) {
+      productQuantities.set(item.productId, (productQuantities.get(item.productId) ?? 0) + item.quantity);
+    }
+    if (item.variantId) {
+      variantQuantities.set(item.variantId, (variantQuantities.get(item.variantId) ?? 0) + item.quantity);
+    }
+  }
+
+  for (const [productId, quantity] of productQuantities) {
+    await tx.product.updateMany({ where: { id: productId }, data: { stockQty: { increment: quantity } } });
+  }
+  for (const [variantId, quantity] of variantQuantities) {
+    const variant = await tx.productVariant.findUnique({ where: { id: variantId } });
+    if (variant?.stockQty != null) {
+      await tx.productVariant.update({ where: { id: variantId }, data: { stockQty: { increment: quantity } } });
+    }
+  }
 }
 
 export async function getOrders(filters: OrderFilters = {}) {
@@ -908,7 +934,35 @@ export async function getOrderById(orderId: string, userId?: string) {
 }
 
 export async function updateOrderStatus(orderId: string, adminId: string, input: any) {
+  const current = await prisma.order.findUnique({ where: { id: orderId } });
+  if (!current) throw new Error("Order not found");
   const status = input.status ? normalizeOrderStatus(input.status) : undefined;
+
+  if (current.status === CommerceOrderStatus.CANCELLED && status !== CommerceOrderStatus.CANCELLED) {
+    throw new Error("Cancelled order status cannot be changed");
+  }
+  if (status === CommerceOrderStatus.PROCESSING && current.paymentStatus !== CommercePaymentStatus.PAID) {
+    throw new Error("Order must be paid before processing");
+  }
+  if (status === CommerceOrderStatus.SHIPPED) {
+    if (current.paymentStatus !== CommercePaymentStatus.PAID) {
+      throw new Error("Order must be paid before shipping");
+    }
+    if (current.verificationStatus !== OrderVerificationStatus.VERIFIED) {
+      throw new Error("Order must be verified before shipping");
+    }
+    if (!current.trackingNumber) throw new Error("Tracking is required before shipping");
+    if (current.status !== CommerceOrderStatus.PROCESSING && current.status !== CommerceOrderStatus.SHIPPED) {
+      throw new Error("Order cannot be marked as shipped from its current status");
+    }
+  }
+  if (
+    status === CommerceOrderStatus.DELIVERED &&
+    current.status !== CommerceOrderStatus.SHIPPED &&
+    current.status !== CommerceOrderStatus.DELIVERED
+  ) {
+    throw new Error("Only a shipped order can be marked delivered");
+  }
   const data: any = {
     ...(status ? { status } : {}),
     ...(input.fulfillmentStatus ? { fulfillmentStatus: input.fulfillmentStatus as FulfillmentStatus } : {}),
@@ -944,6 +998,18 @@ export async function updateOrderStatus(orderId: string, adminId: string, input:
 }
 
 export async function updateOrderTracking(orderId: string, adminId: string, input: any) {
+  const current = await prisma.order.findUnique({ where: { id: orderId } });
+  if (!current) throw new Error("Order not found");
+  if (current.paymentStatus !== CommercePaymentStatus.PAID) {
+    throw new Error("Order must be paid before adding tracking");
+  }
+  if (current.verificationStatus !== OrderVerificationStatus.VERIFIED) {
+    throw new Error("Order must be verified before adding tracking");
+  }
+  if (current.status === CommerceOrderStatus.CANCELLED || current.status === CommerceOrderStatus.DELIVERED) {
+    throw new Error("Tracking cannot be changed for this order");
+  }
+
   const order = await prisma.$transaction(async (tx) => {
     const updated = await tx.order.update({
       where: { id: orderId },
@@ -971,6 +1037,16 @@ export async function updateOrderTracking(orderId: string, adminId: string, inpu
 }
 
 export async function verifyOrder(orderId: string, adminId: string, note?: string) {
+  const current = await prisma.order.findUnique({ where: { id: orderId }, include: { items: true } });
+  if (!current) throw new Error("Order not found");
+  if (current.verificationStatus === OrderVerificationStatus.VERIFIED) return formatOrderSummary(current);
+  if (current.paymentStatus !== CommercePaymentStatus.PAID) {
+    throw new Error("Order must be paid before verification");
+  }
+  if (current.status === CommerceOrderStatus.CANCELLED || current.status === CommerceOrderStatus.DELIVERED) {
+    throw new Error("Order cannot be verified in its current status");
+  }
+
   const order = await prisma.$transaction(async (tx) => {
     const updated = await tx.order.update({
       where: { id: orderId },
@@ -998,17 +1074,36 @@ export async function verifyOrder(orderId: string, adminId: string, note?: strin
 }
 
 export async function cancelOrder(orderId: string, adminId: string, input: any = {}) {
+  const current = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { items: true, shippingLabels: true },
+  });
+  if (!current) throw new Error("Order not found");
+  if (current.status === CommerceOrderStatus.CANCELLED) return getOrderById(orderId);
+  if (current.status === CommerceOrderStatus.SHIPPED || current.status === CommerceOrderStatus.DELIVERED) {
+    throw new Error("Shipped or delivered orders cannot be cancelled");
+  }
+  const hasActiveLabel = current.shippingLabels.some(
+    (label) => label.status === ShippingLabelStatus.CREATED || label.status === ShippingLabelStatus.PRINTED,
+  );
+  if (hasActiveLabel) throw new Error("Void the shipping label before cancelling this order");
+
   const order = await prisma.$transaction(async (tx) => {
-    const updated = await tx.order.update({
-      where: { id: orderId },
+    const claimed = await tx.order.updateMany({
+      where: {
+        id: orderId,
+        status: { notIn: [CommerceOrderStatus.CANCELLED, CommerceOrderStatus.SHIPPED, CommerceOrderStatus.DELIVERED] },
+      },
       data: {
         status: CommerceOrderStatus.CANCELLED,
         cancelledAt: new Date(),
         cancellationReason: input.reason || null,
         cancellationNote: input.note || null,
       },
-      include: { items: true },
     });
+    if (claimed.count === 0) return null;
+
+    await restoreCancelledOrderStock(tx, current);
     await tx.orderStatusHistory.create({
       data: {
         orderId,
@@ -1018,8 +1113,9 @@ export async function cancelOrder(orderId: string, adminId: string, input: any =
         status: CommerceOrderStatus.CANCELLED,
       },
     });
-    return updated;
+    return tx.order.findUnique({ where: { id: orderId }, include: { items: true } });
   });
+  if (!order) return getOrderById(orderId);
   return formatOrderSummary(order);
 }
 
@@ -1117,13 +1213,24 @@ export async function requestOrderCancellation(orderId: string, userId: string, 
 }
 
 export async function approveCancellationRequest(orderId: string, adminId: string, note?: string) {
-  const order = await prisma.order.findUnique({ where: { id: orderId } });
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { items: true, shippingLabels: true },
+  });
   if (!order) throw new Error("Order not found");
   if (!order.cancellationRequested) throw new Error("No pending cancellation request for this order.");
+  const hasActiveLabel = order.shippingLabels.some(
+    (label) => label.status === ShippingLabelStatus.CREATED || label.status === ShippingLabelStatus.PRINTED,
+  );
+  if (hasActiveLabel) throw new Error("Void the shipping label before cancelling this order");
 
   await prisma.$transaction(async (tx) => {
-    await tx.order.update({
-      where: { id: orderId },
+    const claimed = await tx.order.updateMany({
+      where: {
+        id: orderId,
+        cancellationRequested: true,
+        status: { notIn: [CommerceOrderStatus.CANCELLED, CommerceOrderStatus.SHIPPED, CommerceOrderStatus.DELIVERED] },
+      },
       data: {
         status: CommerceOrderStatus.CANCELLED,
         cancelledAt: new Date(),
@@ -1132,6 +1239,9 @@ export async function approveCancellationRequest(orderId: string, adminId: strin
         cancellationRequested: false,
       },
     });
+    if (claimed.count === 0) throw new Error("Order cancellation could not be approved");
+
+    await restoreCancelledOrderStock(tx, order);
     await tx.orderStatusHistory.create({
       data: {
         orderId,
@@ -1613,78 +1723,137 @@ const SHIPPING_LABELS_DIR = path.join(process.cwd(), "uploads", "shipping-labels
 export async function generateUpsShippingLabel(orderId: string, adminId: string) {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
-    include: { items: { include: { product: true } } },
+    include: {
+      items: { include: { product: true } },
+      shippingLabels: { orderBy: { createdAt: "desc" } },
+    },
   });
   if (!order) throw new Error("Order not found");
 
-  if (!order.shippingAddress1 || !order.shippingCity || !order.shippingState || !order.shippingZipCode) {
+  const reusableLabel = order.shippingLabels.find(
+    (label) => label.carrier === "UPS" &&
+      (label.status === ShippingLabelStatus.CREATED || label.status === ShippingLabelStatus.PRINTED),
+  );
+  if (reusableLabel) return reusableLabel;
+
+  if (order.paymentStatus !== CommercePaymentStatus.PAID) {
+    throw new Error("Order must be paid before creating a shipping label");
+  }
+  if (order.verificationStatus !== OrderVerificationStatus.VERIFIED) {
+    throw new Error("Order must be verified before creating a shipping label");
+  }
+  if (order.status !== CommerceOrderStatus.PROCESSING) {
+    throw new Error("Shipping label cannot be created for this order");
+  }
+
+  if (
+    !order.shippingAddress1 ||
+    !order.shippingCity ||
+    !order.shippingState ||
+    !order.shippingZipCode ||
+    !order.shippingCountry
+  ) {
     throw new Error("Shipping address is incomplete");
   }
 
-  const totalWeightLbs = order.items.reduce(
-    (sum, item) => sum + (item.product?.weightLbs ?? UPS_DEFAULT_PACKAGE_WEIGHT_LBS) * item.quantity,
-    0,
-  );
-
-  const shipment = await upsService.createGroundShipment(
-    {
-      name: order.customerName,
-      phone: order.customerPhone || undefined,
-      address1: order.shippingAddress1,
-      address2: order.shippingAddress2,
-      city: order.shippingCity,
-      state: order.shippingState,
-      zipCode: order.shippingZipCode,
-      country: order.shippingCountry,
-    },
-    totalWeightLbs,
-  );
-
-  fs.mkdirSync(SHIPPING_LABELS_DIR, { recursive: true });
-  const labelFilename = `${order.orderNumber}-${Date.now()}.gif`;
-  fs.writeFileSync(path.join(SHIPPING_LABELS_DIR, labelFilename), Buffer.from(shipment.labelBase64, "base64"));
-  const labelUrl = `uploads/shipping-labels/${labelFilename}`;
-
-  const label = await prisma.$transaction(async (tx) => {
-    const created = await tx.shippingLabel.create({
+  const activeKey = `UPS:${order.id}`;
+  let pendingLabel;
+  try {
+    pendingLabel = await prisma.shippingLabel.create({
       data: {
         orderId,
-        status: ShippingLabelStatus.CREATED,
+        activeKey,
+        status: ShippingLabelStatus.PENDING,
         shippingMethod: ShippingMethod.GROUND,
         carrier: "UPS",
-        serviceCode: shipment.serviceCode,
-        trackingNumber: shipment.trackingNumber,
-        trackingUrl: shipment.trackingUrl,
-        labelUrl,
-        labelFormat: shipment.labelFormat,
-        shipmentId: shipment.shipmentId,
-        costCents: shipment.amountUsd != null ? fromDollars(shipment.amountUsd) : null,
         requestedById: adminId,
       },
     });
-    await tx.order.update({
-      where: { id: orderId },
-      data: {
-        deliveryStatus: DeliveryStatus.LABEL_CREATED,
-        trackingNumber: shipment.trackingNumber,
-        trackingUrl: shipment.trackingUrl,
-        courierName: "UPS",
-        shippingMethod: ShippingMethod.GROUND,
-      },
-    });
-    await tx.orderStatusHistory.create({
-      data: {
-        orderId,
-        updatedById: adminId,
-        action: "ups_shipping_label_create",
-        deliveryStatus: DeliveryStatus.LABEL_CREATED,
-        note: `UPS tracking ${shipment.trackingNumber}`,
-      },
-    });
-    return created;
-  });
+  } catch (error) {
+    const existing = await prisma.shippingLabel.findUnique({ where: { activeKey } });
+    if (existing) {
+      if (existing.status === ShippingLabelStatus.PENDING) {
+        throw new Error("UPS label generation is already in progress");
+      }
+      return existing;
+    }
+    throw error;
+  }
 
-  return label;
+  try {
+    const totalWeightLbs = order.items.reduce(
+      (sum, item) => sum + (item.product?.weightLbs ?? UPS_DEFAULT_PACKAGE_WEIGHT_LBS) * item.quantity,
+      0,
+    );
+
+    const shipment = await upsService.createGroundShipment(
+      {
+        name: order.customerName,
+        phone: order.customerPhone || undefined,
+        address1: order.shippingAddress1,
+        address2: order.shippingAddress2,
+        city: order.shippingCity,
+        state: order.shippingState,
+        zipCode: order.shippingZipCode,
+        country: order.shippingCountry,
+      },
+      totalWeightLbs,
+    );
+
+    fs.mkdirSync(SHIPPING_LABELS_DIR, { recursive: true });
+    const labelFilename = `${order.orderNumber}-${Date.now()}.gif`;
+    fs.writeFileSync(path.join(SHIPPING_LABELS_DIR, labelFilename), Buffer.from(shipment.labelBase64, "base64"));
+    const labelUrl = `uploads/shipping-labels/${labelFilename}`;
+
+    const label = await prisma.$transaction(async (tx) => {
+      const updatedLabel = await tx.shippingLabel.update({
+        where: { id: pendingLabel.id },
+        data: {
+          status: ShippingLabelStatus.CREATED,
+          serviceCode: shipment.serviceCode,
+          trackingNumber: shipment.trackingNumber,
+          trackingUrl: shipment.trackingUrl,
+          labelUrl,
+          labelFormat: shipment.labelFormat,
+          shipmentId: shipment.shipmentId,
+          costCents: shipment.amountUsd != null ? fromDollars(shipment.amountUsd) : null,
+          errorMessage: null,
+        },
+      });
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          deliveryStatus: DeliveryStatus.LABEL_CREATED,
+          trackingNumber: shipment.trackingNumber,
+          trackingUrl: shipment.trackingUrl,
+          courierName: "UPS",
+          shippingMethod: ShippingMethod.GROUND,
+        },
+      });
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId,
+          updatedById: adminId,
+          action: "ups_shipping_label_create",
+          deliveryStatus: DeliveryStatus.LABEL_CREATED,
+          note: `UPS tracking ${shipment.trackingNumber}`,
+        },
+      });
+      return updatedLabel;
+    });
+
+    return label;
+  } catch (error) {
+    await prisma.shippingLabel.update({
+      where: { id: pendingLabel.id },
+      data: {
+        status: ShippingLabelStatus.FAILED,
+        activeKey: null,
+        errorMessage: error instanceof Error ? error.message : "UPS label generation failed",
+      },
+    }).catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function markShippingLabelPrinted(labelId: string, adminId: string) {
@@ -1697,15 +1866,52 @@ export async function markShippingLabelPrinted(labelId: string, adminId: string)
 }
 
 export async function voidShippingLabel(labelId: string, adminId: string) {
-  const label = await prisma.shippingLabel.update({
-    where: { id: labelId },
-    data: { status: ShippingLabelStatus.VOIDED, voidedAt: new Date() },
+  const current = await prisma.shippingLabel.findUnique({ where: { id: labelId } });
+  if (!current) throw new Error("Shipping label not found");
+  if (current.status === ShippingLabelStatus.VOIDED) return current;
+  if (
+    current.status !== ShippingLabelStatus.CREATED &&
+    current.status !== ShippingLabelStatus.PRINTED
+  ) {
+    throw new Error("Shipping label cannot be voided");
+  }
+
+  if (current.carrier.toUpperCase() === "UPS") {
+    await upsService.voidShipment(current.shipmentId || "", current.trackingNumber);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const label = await tx.shippingLabel.update({
+      where: { id: labelId },
+      data: { status: ShippingLabelStatus.VOIDED, voidedAt: new Date(), activeKey: null },
+    });
+
+    if (current.trackingNumber) {
+      await tx.order.updateMany({
+        where: { id: current.orderId, trackingNumber: current.trackingNumber },
+        data: {
+          deliveryStatus: DeliveryStatus.NOT_APPLICABLE,
+          trackingNumber: null,
+          trackingUrl: null,
+          courierName: null,
+        },
+      });
+    }
+
+    await tx.orderStatusHistory.create({
+      data: {
+        orderId: current.orderId,
+        updatedById: adminId,
+        action: "shipping_label_voided",
+        deliveryStatus: DeliveryStatus.NOT_APPLICABLE,
+        note: current.trackingNumber ? `Voided ${current.carrier} label ${current.trackingNumber}` : undefined,
+      },
+    });
+    return label;
   });
-  await createStatusHistory(label.orderId, adminId, "shipping_label_voided");
-  return label;
 }
 
-export async function createProductOrderIntent(userId: string, input: CreateOrderIntentInput) {
+async function prepareProductOrder(userId: string, input: CreateOrderIntentInput) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new Error("User not found");
 
@@ -1765,7 +1971,7 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
   const shippingZipCode = input.shippingZipCode ?? user.practiceZipCode ?? user.zipCode ?? null;
   const shippingCountry = input.shippingCountry ?? user.practiceCountry ?? user.country ?? null;
 
-  if (!shippingAddress1 || !shippingCity || !shippingState || !shippingZipCode) {
+  if (!shippingAddress1 || !shippingCity || !shippingState || !shippingZipCode || !shippingCountry) {
     throw new Error("Shipping address is incomplete");
   }
 
@@ -1781,37 +1987,126 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
     totalWeightLbs,
   );
   const shippingFeeCents = Math.round(rate.amountUsd * 100);
-
-  const orderNumber = await getNextOrderNumber();
   const totalAmountCents = subtotalCents + shippingFeeCents;
-  const order = await prisma.order.create({
-    data: {
-      orderNumber,
-      userId,
-      customerName: user.fullName,
-      customerEmail: user.email,
-      customerPhone: user.phoneNumber,
-      shippingAddress1,
-      shippingAddress2,
-      shippingCity,
-      shippingState,
-      shippingZipCode,
-      shippingCountry,
-      shippingMethod: input.shippingMethod ?? ShippingMethod.GROUND,
-      subtotalCents,
-      shippingFeeCents,
-      totalAmountCents,
-      notes: input.notes ?? null,
-      items: { create: orderItems },
+
+  return {
+    user,
+    orderItems,
+    subtotalCents,
+    shippingFeeCents,
+    totalAmountCents,
+    shippingAddress1,
+    shippingAddress2,
+    shippingCity,
+    shippingState,
+    shippingZipCode,
+    shippingCountry,
+    shippingMethod: input.shippingMethod ?? ShippingMethod.GROUND,
+    notes: input.notes ?? null,
+    rate,
+  };
+}
+
+export async function getProductCheckoutProfile(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new Error("User not found");
+
+  return {
+    customerName: user.fullName,
+    customerPhone: user.phoneNumber,
+    shippingAddress: {
+      address1: user.practiceAddressLine1 ?? user.address ?? "",
+      address2: user.practiceAddressLine2 ?? "",
+      city: user.practiceCity ?? user.city ?? "",
+      state: user.practiceState ?? user.stateProvince ?? "",
+      zipCode: user.practiceZipCode ?? user.zipCode ?? "",
+      country: user.practiceCountry ?? user.country ?? "",
     },
-    include: { items: true },
-  });
+  };
+}
+
+export async function quoteProductOrder(userId: string, input: CreateOrderIntentInput) {
+  const prepared = await prepareProductOrder(userId, input);
+  return {
+    currency: "USD",
+    subtotalUsd: toDollars(prepared.subtotalCents),
+    shippingFeeUsd: toDollars(prepared.shippingFeeCents),
+    totalUsd: toDollars(prepared.totalAmountCents),
+    shippingMethod: prepared.shippingMethod,
+    serviceName: prepared.rate.serviceName,
+    shippingAddress: {
+      address1: prepared.shippingAddress1,
+      address2: prepared.shippingAddress2,
+      city: prepared.shippingCity,
+      state: prepared.shippingState,
+      zipCode: prepared.shippingZipCode,
+      country: prepared.shippingCountry,
+    },
+  };
+}
+
+export async function createProductOrderIntent(userId: string, input: CreateOrderIntentInput) {
+  const prepared = await prepareProductOrder(userId, input);
+  const {
+    user,
+    orderItems,
+    subtotalCents,
+    shippingFeeCents,
+    totalAmountCents,
+    shippingAddress1,
+    shippingAddress2,
+    shippingCity,
+    shippingState,
+    shippingZipCode,
+    shippingCountry,
+    shippingMethod,
+    notes,
+  } = prepared;
+
+  if (
+    input.expectedTotalAmountCents != null &&
+    Math.round(Number(input.expectedTotalAmountCents)) !== totalAmountCents
+  ) {
+    throw new Error("Order total changed");
+  }
+
+  let order: any = null;
+  for (let attempt = 0; attempt < 3 && !order; attempt += 1) {
+    const orderNumber = await getNextOrderNumber();
+    try {
+      order = await prisma.order.create({
+        data: {
+          orderNumber,
+          userId,
+          customerName: user.fullName,
+          customerEmail: user.email,
+          customerPhone: user.phoneNumber,
+          shippingAddress1,
+          shippingAddress2,
+          shippingCity,
+          shippingState,
+          shippingZipCode,
+          shippingCountry,
+          shippingMethod,
+          subtotalCents,
+          shippingFeeCents,
+          totalAmountCents,
+          notes,
+          items: { create: orderItems },
+        },
+        include: { items: true },
+      });
+    } catch (error: any) {
+      if (error?.code !== "P2002" || attempt === 2) throw error;
+    }
+  }
+  if (!order) throw new Error("Unable to create order number");
 
   try {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: totalAmountCents,
       currency: "usd",
-      metadata: { orderId: order.id, orderNumber: order.orderNumber, userId },
+      metadata: { kind: "product_order", orderId: order.id, orderNumber: order.orderNumber, userId },
       payment_method_types: ["card"],
     });
 
@@ -1835,59 +2130,163 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
   }
 }
 
-export async function confirmProductOrderPayment(userId: string, paymentIntentId: string) {
+async function finalizeProductOrderPayment(paymentIntent: Stripe.PaymentIntent, userId?: string) {
   const order = await prisma.order.findFirst({
-    where: { userId, stripePaymentIntentId: paymentIntentId },
+    where: { ...(userId ? { userId } : {}), stripePaymentIntentId: paymentIntent.id },
     include: { items: true },
   });
   if (!order) throw new Error("Order not found");
   if (order.paymentStatus === CommercePaymentStatus.PAID) {
     return { message: "Already confirmed", alreadyConfirmed: true, order: formatOrderSummary(order) };
   }
-
-  const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
   if (paymentIntent.status !== "succeeded") throw new Error("Payment has not succeeded");
+  if (
+    paymentIntent.currency.toLowerCase() !== order.currency.toLowerCase() ||
+    paymentIntent.amount_received !== order.totalAmountCents
+  ) {
+    throw new Error("Payment amount does not match order");
+  }
+  if (order.status === CommerceOrderStatus.CANCELLED) {
+    throw new Error("Cancelled order cannot be paid");
+  }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.order.update({
-      where: { id: order.id },
+  const finalized = await prisma.$transaction(async (tx) => {
+    const claim = await tx.order.updateMany({
+      where: {
+        id: order.id,
+        paymentStatus: { in: [CommercePaymentStatus.PENDING, CommercePaymentStatus.FAILED] },
+        status: { not: CommerceOrderStatus.CANCELLED },
+      },
       data: {
         paymentStatus: CommercePaymentStatus.PAID,
         status: CommerceOrderStatus.PROCESSING,
         paidAt: new Date(),
       },
     });
+    if (claim.count === 0) return false;
 
+    const productQuantities = new Map<string, number>();
+    const variantQuantities = new Map<string, number>();
     for (const item of order.items) {
       if (item.productId) {
-        await tx.product.update({
-          where: { id: item.productId },
-          data: { stockQty: { decrement: item.quantity } },
-        });
+        productQuantities.set(item.productId, (productQuantities.get(item.productId) ?? 0) + item.quantity);
       }
       if (item.variantId) {
-        const variant = await tx.productVariant.findUnique({ where: { id: item.variantId } });
-        if (variant?.stockQty != null) {
-          await tx.productVariant.update({
-            where: { id: item.variantId },
-            data: { stockQty: { decrement: item.quantity } },
-          });
-        }
+        variantQuantities.set(item.variantId, (variantQuantities.get(item.variantId) ?? 0) + item.quantity);
+      }
+    }
+
+    for (const [productId, quantity] of productQuantities) {
+      const result = await tx.product.updateMany({
+        where: { id: productId, stockQty: { gte: quantity } },
+        data: { stockQty: { decrement: quantity } },
+      });
+      if (result.count === 0) {
+        throw new Error("Product is out of stock");
+      }
+    }
+
+    for (const [variantId, quantity] of variantQuantities) {
+      const variant = await tx.productVariant.findUnique({ where: { id: variantId } });
+      if (variant?.stockQty == null) continue;
+      const result = await tx.productVariant.updateMany({
+        where: { id: variantId, stockQty: { gte: quantity } },
+        data: { stockQty: { decrement: quantity } },
+      });
+      if (result.count === 0) {
+        throw new Error("Product is out of stock");
       }
     }
 
     await tx.orderStatusHistory.create({
       data: {
         orderId: order.id,
-        updatedById: userId,
+        updatedById: userId ?? order.userId,
         action: "payment_confirmed",
         status: CommerceOrderStatus.PROCESSING,
         paymentStatus: CommercePaymentStatus.PAID,
       },
     });
+    return true;
   });
 
+  if (!finalized) {
+    const current = await prisma.order.findUnique({ where: { id: order.id }, include: { items: true } });
+    if (current?.paymentStatus === CommercePaymentStatus.PAID) {
+      return { message: "Already confirmed", alreadyConfirmed: true, order: formatOrderSummary(current) };
+    }
+    throw new Error("Order payment could not be finalized");
+  }
+
   return { message: "Order payment confirmed", alreadyConfirmed: false, order: await getOrderById(order.id, userId) };
+}
+
+export async function confirmProductOrderPayment(userId: string, paymentIntentId: string) {
+  const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  return finalizeProductOrderPayment(paymentIntent, userId);
+}
+
+export async function discardProductOrderIntent(userId: string, paymentIntentId: string) {
+  const order = await prisma.order.findFirst({
+    where: { userId, stripePaymentIntentId: paymentIntentId },
+    include: { items: true },
+  });
+  if (!order) return { discarded: true };
+  if (order.paymentStatus === CommercePaymentStatus.PAID) {
+    return { discarded: false, order: formatOrderSummary(order) };
+  }
+
+  const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  if (paymentIntent.status === "succeeded") {
+    return {
+      discarded: false,
+      order: (await finalizeProductOrderPayment(paymentIntent, userId)).order,
+    };
+  }
+
+  if (paymentIntent.status !== "canceled") {
+    await stripe.paymentIntents.cancel(paymentIntentId);
+  }
+
+  await prisma.order.deleteMany({
+    where: {
+      id: order.id,
+      paymentStatus: { not: CommercePaymentStatus.PAID },
+    },
+  });
+  return { discarded: true };
+}
+
+export async function confirmProductOrderPaymentFromWebhook(paymentIntent: Stripe.PaymentIntent) {
+  return finalizeProductOrderPayment(paymentIntent);
+}
+
+export async function failProductOrderPaymentFromWebhook(paymentIntentId: string, cancelled = false) {
+  const order = await prisma.order.findUnique({ where: { stripePaymentIntentId: paymentIntentId } });
+  if (!order || order.paymentStatus === CommercePaymentStatus.PAID) return;
+
+  await prisma.$transaction(async (tx) => {
+    const updated = await tx.order.updateMany({
+      where: {
+        id: order.id,
+        paymentStatus: { in: [CommercePaymentStatus.PENDING, CommercePaymentStatus.FAILED] },
+      },
+      data: {
+        paymentStatus: CommercePaymentStatus.FAILED,
+        ...(cancelled ? { status: CommerceOrderStatus.CANCELLED, cancelledAt: new Date() } : {}),
+      },
+    });
+    if (updated.count === 0) return;
+    await tx.orderStatusHistory.create({
+      data: {
+        orderId: order.id,
+        updatedById: order.userId,
+        action: cancelled ? "payment_intent_cancelled" : "payment_failed",
+        paymentStatus: CommercePaymentStatus.FAILED,
+        ...(cancelled ? { status: CommerceOrderStatus.CANCELLED } : {}),
+      },
+    });
+  });
 }
 
 export async function getMyOrders(userId: string, status?: string) {
