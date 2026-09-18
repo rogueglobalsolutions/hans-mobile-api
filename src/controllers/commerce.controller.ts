@@ -122,6 +122,7 @@ export async function createProduct(req: Request, res: Response) {
       fdaCleared: bool(req.body.fdaCleared),
       securePackaging: bool(req.body.securePackaging),
       groundShippingOnly: bool(req.body.groundShippingOnly),
+      creditEligible: bool(req.body.creditEligible),
       variants,
     });
     res.status(201).json({ success: true, data });
@@ -376,6 +377,19 @@ export async function getCustomerById(req: Request, res: Response) {
 export async function getRevenueSummary(req: Request, res: Response) {
   try {
     const data = await commerceService.getRevenueSummary({
+      filterType: str(req.query.filterType) as any,
+      startDate: str(req.query.startDate),
+      endDate: str(req.query.endDate),
+    });
+    res.json({ success: true, data });
+  } catch (err) {
+    sendError(res, err, "getCommerceReports");
+  }
+}
+
+export async function getFinancialSummary(req: Request, res: Response) {
+  try {
+    const data = await commerceService.getFinancialSummary({
       filterType: str(req.query.filterType) as any,
       startDate: str(req.query.startDate),
       endDate: str(req.query.endDate),

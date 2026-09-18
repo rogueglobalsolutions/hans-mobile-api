@@ -2,12 +2,13 @@ import prisma from "../config/prisma";
 import { stripe, TRAINING_LEVEL_STRIPE_PRICES, OBSERVER_STRIPE_PRICE_ID } from "../config/stripe";
 import {
   TrainingType, TrainingBrand, TrainingLevel, CreditTransactionType,
-  TrainingStatus, EnrollmentType, PaymentStatus,
+  TrainingStatus, EnrollmentType, PaymentStatus, EnrollmentAttendanceStatus,
 } from "../generated/prisma/enums";
 import { LearningFormat } from "../utils/trainingEnums";
 import { sendTrainingCancellationEmail } from "./email.service";
 import { TRAINING_LEVEL_PRICING } from "../utils/trainingEnums";
 import { redeemDiscountCode } from "./discount.service";
+import { getSubmittedApplication } from "./trainingApplication.service";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -65,6 +66,17 @@ const QUALIFYING_LEVELS = new Set<TrainingLevel>([
   TrainingLevel.SUPPLEMENTAL,
 ]);
 
+const RESERVATION_WINDOW_MS = 15 * 60 * 1000;
+
+export class ObserverConfirmationRequiredError extends Error {
+  readonly code = "OBSERVER_CONFIRMATION_REQUIRED";
+
+  constructor(readonly observerPriceUsd: number) {
+    super("Training is currently full. Would you like to be an observer instead?");
+    this.name = "ObserverConfirmationRequiredError";
+  }
+}
+
 // ─── Service functions ────────────────────────────────────────────────────────
 
 export async function createTraining(input: CreateTrainingInput) {
@@ -98,11 +110,12 @@ export async function updateTraining(trainingId: string, input: UpdateTrainingIn
   });
   if (!training) throw new Error("Training not found");
 
-  const completedCount = await prisma.enrollment.count({
-    where: { trainingId, paymentStatus: PaymentStatus.COMPLETED },
-  });
-  if (completedCount > 0) {
-    throw new Error("Training cannot be edited once it has students.");
+  const [enrollmentCount, applicationCount] = await Promise.all([
+    prisma.enrollment.count({ where: { trainingId } }),
+    prisma.trainingApplication.count({ where: { trainingId } }),
+  ]);
+  if (enrollmentCount > 0 || applicationCount > 0) {
+    throw new Error("Training cannot be edited once it has applications or enrollments.");
   }
 
   let price = input.price;
@@ -144,11 +157,12 @@ export async function deleteTraining(trainingId: string) {
   });
   if (!training) throw new Error("Training not found");
 
-  const completedCount = await prisma.enrollment.count({
-    where: { trainingId, paymentStatus: PaymentStatus.COMPLETED },
-  });
-  if (completedCount > 0) {
-    throw new Error("Training cannot be deleted once it has enrollments. Cancel it instead.");
+  const [enrollmentCount, applicationCount] = await Promise.all([
+    prisma.enrollment.count({ where: { trainingId } }),
+    prisma.trainingApplication.count({ where: { trainingId } }),
+  ]);
+  if (enrollmentCount > 0 || applicationCount > 0) {
+    throw new Error("Training cannot be deleted once it has applications or enrollments. Cancel it instead.");
   }
 
   await prisma.training.delete({ where: { id: trainingId } });
@@ -179,7 +193,7 @@ export async function getTrainings() {
       createdAt:           true,
       subOptions:          true,
       _count: {
-        select: { enrollments: true },
+        select: { enrollments: true, applications: true },
       },
     },
     orderBy: { createdAt: "desc" },
@@ -191,16 +205,23 @@ export async function getTrainings() {
 export async function getTrainingById(trainingId: string, requestingUserId?: string) {
   const training = await prisma.training.findUnique({
     where: { id: trainingId },
-    include: { _count: { select: { enrollments: true } } },
+    include: { _count: { select: { enrollments: true, applications: true } } },
   });
 
   if (!training) throw new Error("Training not found");
 
+  const now = new Date();
   const enrolleeCount = await prisma.enrollment.count({
-    where: { trainingId, type: EnrollmentType.ENROLLEE, paymentStatus: PaymentStatus.COMPLETED },
+    where: { trainingId, type: EnrollmentType.ENROLLEE, OR: [
+      { paymentStatus: PaymentStatus.COMPLETED },
+      { paymentStatus: PaymentStatus.PENDING, reservationExpiresAt: { gt: now } },
+    ] },
   });
   const observerCount = await prisma.enrollment.count({
-    where: { trainingId, type: EnrollmentType.OBSERVER, paymentStatus: PaymentStatus.COMPLETED },
+    where: { trainingId, type: EnrollmentType.OBSERVER, OR: [
+      { paymentStatus: PaymentStatus.COMPLETED },
+      { paymentStatus: PaymentStatus.PENDING, reservationExpiresAt: { gt: now } },
+    ] },
   });
 
   let isEnrolled = false;
@@ -221,6 +242,7 @@ export async function getTrainingById(trainingId: string, requestingUserId?: str
       where: {
         userId: requestingUserId,
         paymentStatus: PaymentStatus.COMPLETED,
+        attendanceStatus: EnrollmentAttendanceStatus.COMPLETED,
         training: { level: { in: Array.from(QUALIFYING_LEVELS) as TrainingLevel[] } },
       },
     });
@@ -239,88 +261,86 @@ export async function getTrainingById(trainingId: string, requestingUserId?: str
   };
 }
 
+async function cleanupExpiredReservations(trainingId: string) {
+  const expired = await prisma.enrollment.findMany({
+    where: {
+      trainingId,
+      paymentStatus: PaymentStatus.PENDING,
+      reservationExpiresAt: { lte: new Date() },
+    },
+  });
+  for (const enrollment of expired) {
+    if (enrollment.stripePaymentIntentId) {
+      try {
+        const intent = await stripe.paymentIntents.retrieve(enrollment.stripePaymentIntentId);
+        if (intent.status !== "succeeded" && intent.status !== "canceled") {
+          await stripe.paymentIntents.cancel(intent.id);
+        }
+      } catch (error) {
+        console.error("Failed to cancel expired training PaymentIntent:", error);
+      }
+    }
+    await prisma.$transaction(async (tx) => {
+      await tx.enrollment.updateMany({
+        where: { id: enrollment.id, paymentStatus: PaymentStatus.PENDING },
+        data: { paymentStatus: PaymentStatus.FAILED, reservationExpiresAt: null },
+      });
+      await tx.enrollmentPaymentAttempt.updateMany({
+        where: { enrollmentId: enrollment.id, status: PaymentStatus.PENDING },
+        data: { status: PaymentStatus.FAILED },
+      });
+    });
+  }
+}
+
 export async function initiateEnrollment(
   userId: string,
   trainingId: string,
-  salesRepId?: string,
+  _salesRepId?: string,
   subOptionIndex?: number,
   discountCode?: string,
+  requestedType: EnrollmentType = EnrollmentType.ENROLLEE,
 ) {
+  await cleanupExpiredReservations(trainingId);
   const training = await prisma.training.findUnique({ where: { id: trainingId } });
   if (!training) throw new Error("Training not found");
   if (training.status !== TrainingStatus.ACTIVE) throw new Error("Training is not available for enrollment");
 
-  const enrolleeCount = await prisma.enrollment.count({
-    where: { trainingId, type: EnrollmentType.ENROLLEE, paymentStatus: PaymentStatus.COMPLETED },
+  const application = await getSubmittedApplication(userId, trainingId);
+  if (!application) throw new Error("Submit the training application before payment");
+
+  const reusable = await prisma.enrollment.findUnique({
+    where: { userId_trainingId: { userId, trainingId } },
   });
-  const observerCount = await prisma.enrollment.count({
-    where: { trainingId, type: EnrollmentType.OBSERVER, paymentStatus: PaymentStatus.COMPLETED },
-  });
-
-  let enrollmentType: EnrollmentType;
-  if (enrolleeCount < training.maxEnrollees) {
-    enrollmentType = EnrollmentType.ENROLLEE;
-  } else if (observerCount < training.maxObservers) {
-    enrollmentType = EnrollmentType.OBSERVER;
-  } else {
-    throw new Error("Training is full");
-  }
-
-  const stripePriceId =
-    enrollmentType === EnrollmentType.OBSERVER
-      ? OBSERVER_STRIPE_PRICE_ID
-      : TRAINING_LEVEL_STRIPE_PRICES[training.level];
-  const stripePrice = await stripe.prices.retrieve(stripePriceId);
-
-  if (!stripePrice.active) throw new Error(`Stripe price is inactive: ${stripePriceId}`);
-  if (stripePrice.currency.toLowerCase() !== "usd") throw new Error(`Stripe price currency must be USD: ${stripePriceId}`);
-  if (stripePrice.type !== "one_time") throw new Error(`Stripe price must be one_time: ${stripePriceId}`);
-  if (stripePrice.unit_amount == null) throw new Error(`Stripe price unit_amount is missing: ${stripePriceId}`);
-
-  // ✅ Use subOption price/creditScore if selected, otherwise use default
-  const subOptions = training.subOptions as SubOption[] | null;
-  let finalAmountCents = stripePrice.unit_amount;
-  let finalCreditScore = training.creditScore;
-
   if (
-    enrollmentType === EnrollmentType.ENROLLEE &&
-    subOptions &&
-    subOptions.length > 0 &&
-    subOptionIndex !== undefined &&
-    subOptionIndex >= 0 &&
-    subOptionIndex < subOptions.length
+    reusable?.paymentStatus === PaymentStatus.PENDING &&
+    reusable.reservationExpiresAt && reusable.reservationExpiresAt > new Date() &&
+    reusable.stripePaymentIntentId
   ) {
-    const selected = subOptions[subOptionIndex];
-    finalAmountCents = selected.price * 100;
-    finalCreditScore = selected.creditScore;
-  }
-
-  // ✅ Apply discount code if provided
-  console.log('[initiateEnrollment] discountCode received:', discountCode);
-  if (discountCode && enrollmentType === EnrollmentType.ENROLLEE) {
-    const discount = await prisma.discountCode.findUnique({
-      where: { code: discountCode.toUpperCase() },
-    });
-    if (discount && discount.isActive &&
-      (!discount.expiresAt || new Date() < discount.expiresAt) &&
-      (discount.maxUses === null || discount.usedCount < discount.maxUses) &&
-      (discount.applicableTo === 'TRAINING' || discount.applicableTo === 'BOTH')
-    ) {
-      if (discount.type === 'FIXED') {
-        finalAmountCents = Math.max(0, finalAmountCents - discount.value * 100);
-      } else {
-        finalAmountCents = Math.max(0, Math.round(finalAmountCents * (1 - discount.value / 100)));
-      }
+    const intent = await stripe.paymentIntents.retrieve(reusable.stripePaymentIntentId);
+    if (intent.status === "succeeded") {
+      await confirmEnrollmentPayment(intent.id, userId);
+      throw new Error("Already enrolled in this training");
+    }
+    if (intent.status !== "canceled" && reusable.type === requestedType) {
+      return {
+        clientSecret: intent.client_secret!,
+        paymentIntentId: intent.id,
+        enrollmentType: reusable.type,
+        amountUsd: reusable.paidAmount ?? intent.amount / 100,
+      };
+    }
+    if (intent.status === "canceled" || reusable.type !== requestedType) {
+      await failEnrollment(intent.id, userId);
     }
   }
-
-  const finalAmountUsd = finalAmountCents / 100;
 
   if (PREREQUISITE_LEVELS.has(training.level)) {
     const hasPrerequisite = await prisma.enrollment.findFirst({
       where: {
         userId,
         paymentStatus: PaymentStatus.COMPLETED,
+        attendanceStatus: EnrollmentAttendanceStatus.COMPLETED,
         training: { level: { in: Array.from(QUALIFYING_LEVELS) as TrainingLevel[] } },
       },
     });
@@ -329,116 +349,215 @@ export async function initiateEnrollment(
     }
   }
 
-  const existing = await prisma.enrollment.findUnique({
-    where: { userId_trainingId: { userId, trainingId } },
-  });
-
-  if (existing && existing.paymentStatus === PaymentStatus.COMPLETED) {
-    throw new Error("Already enrolled in this training");
+  const standardPriceId = TRAINING_LEVEL_STRIPE_PRICES[training.level];
+  const standardPrice = await stripe.prices.retrieve(standardPriceId);
+  if (!standardPrice.active || standardPrice.currency.toLowerCase() !== "usd" ||
+      standardPrice.type !== "one_time" || standardPrice.unit_amount == null) {
+    throw new Error(`Stripe price is not valid: ${standardPriceId}`);
   }
 
-  const paymentIntent = await stripe.paymentIntents.create({
-    amount: finalAmountCents,
-    currency: "usd",
-    metadata: {
-      trainingId,
-      userId,
-      enrollmentType,
-      stripePriceId,
-      subOptionIndex: subOptionIndex?.toString() ?? "",
-      creditScore: finalCreditScore.toString(),
-      discountCode: discountCode ?? "",
-    },
-    payment_method_types: ['card'],
+  let enrolleeAmountCents = standardPrice.unit_amount;
+  let enrolleeCreditScore = training.creditScore;
+  const subOptions = training.subOptions as SubOption[] | null;
+  if (subOptions?.length && subOptionIndex !== undefined && subOptionIndex >= 0 && subOptionIndex < subOptions.length) {
+    enrolleeAmountCents = subOptions[subOptionIndex].price * 100;
+    enrolleeCreditScore = subOptions[subOptionIndex].creditScore;
+  }
+
+  if (discountCode) {
+    const discount = await prisma.discountCode.findUnique({ where: { code: discountCode.toUpperCase() } });
+    if (discount?.isActive && (!discount.expiresAt || new Date() < discount.expiresAt) &&
+        (discount.maxUses === null || discount.usedCount < discount.maxUses) &&
+        (discount.applicableTo === "TRAINING" || discount.applicableTo === "BOTH")) {
+      enrolleeAmountCents = discount.type === "FIXED"
+        ? Math.max(0, enrolleeAmountCents - discount.value * 100)
+        : Math.max(0, Math.round(enrolleeAmountCents * (1 - discount.value / 100)));
+    }
+  }
+
+  const observerPrice = await stripe.prices.retrieve(OBSERVER_STRIPE_PRICE_ID);
+  if (!observerPrice.active || observerPrice.currency.toLowerCase() !== "usd" ||
+      observerPrice.type !== "one_time" || observerPrice.unit_amount == null) {
+    throw new Error("Observer checkout is not configured");
+  }
+
+  const reservationExpiresAt = new Date(Date.now() + RESERVATION_WINDOW_MS);
+  const reservation = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${trainingId}))`;
+    const now = new Date();
+    const [enrolleeCount, observerCount] = await Promise.all([
+      tx.enrollment.count({
+        where: { trainingId, type: EnrollmentType.ENROLLEE, OR: [
+          { paymentStatus: PaymentStatus.COMPLETED },
+          { paymentStatus: PaymentStatus.PENDING, reservationExpiresAt: { gt: now } },
+        ] },
+      }),
+      tx.enrollment.count({
+        where: { trainingId, type: EnrollmentType.OBSERVER, OR: [
+          { paymentStatus: PaymentStatus.COMPLETED },
+          { paymentStatus: PaymentStatus.PENDING, reservationExpiresAt: { gt: now } },
+        ] },
+      }),
+    ]);
+    const existing = await tx.enrollment.findUnique({
+      where: { userId_trainingId: { userId, trainingId } },
+    });
+    if (existing?.paymentStatus === PaymentStatus.COMPLETED) throw new Error("Already enrolled in this training");
+    if (
+      existing?.paymentStatus === PaymentStatus.PENDING &&
+      existing.reservationExpiresAt &&
+      existing.reservationExpiresAt > now
+    ) {
+      throw new Error("Payment setup is already in progress. Please wait a moment and try again.");
+    }
+
+    let type: EnrollmentType;
+    if (requestedType === EnrollmentType.ENROLLEE) {
+      if (enrolleeCount < training.maxEnrollees) {
+        type = EnrollmentType.ENROLLEE;
+      } else if (observerCount < training.maxObservers) {
+        throw new ObserverConfirmationRequiredError(observerPrice.unit_amount! / 100);
+      } else {
+        throw new Error("Training is full");
+      }
+    } else {
+      if (enrolleeCount < training.maxEnrollees) {
+        throw new Error("Observer enrollment is only available when enrollee seats are full");
+      }
+      if (observerCount >= training.maxObservers) throw new Error("Training is full");
+      type = EnrollmentType.OBSERVER;
+    }
+
+    const amountCents = type === EnrollmentType.OBSERVER ? observerPrice.unit_amount! : enrolleeAmountCents;
+    const creditScore = type === EnrollmentType.OBSERVER ? 0 : enrolleeCreditScore;
+    const enrollment = await tx.enrollment.upsert({
+      where: { userId_trainingId: { userId, trainingId } },
+      create: {
+        userId, trainingId, type, salesRepId: application.salesRepId,
+        paymentStatus: PaymentStatus.PENDING, paidAmount: amountCents / 100, reservationExpiresAt,
+      },
+      update: {
+        type, salesRepId: application.salesRepId, paymentStatus: PaymentStatus.PENDING,
+        paidAmount: amountCents / 100, reservationExpiresAt, stripeRefundId: null, refundedAt: null,
+      },
+    });
+    return { enrollment, type, amountCents, creditScore };
   });
 
-  if (existing) {
-    await prisma.enrollment.update({
-      where: { userId_trainingId: { userId, trainingId } },
-      data: {
-        type: enrollmentType,
-        salesRepId: salesRepId ?? null,
-        paymentStatus: PaymentStatus.PENDING,
-        stripePaymentIntentId: paymentIntent.id,
-        paidAmount: finalAmountUsd,
+  let paymentIntent;
+  try {
+    paymentIntent = await stripe.paymentIntents.create({
+      amount: reservation.amountCents,
+      currency: "usd",
+      metadata: {
+        trainingId, userId, enrollmentId: reservation.enrollment.id,
+        enrollmentType: reservation.type, salesRepId: application.salesRepId ?? "",
+        creditScore: reservation.creditScore.toString(), discountCode: discountCode ?? "",
       },
+      payment_method_types: ["card"],
     });
-  } else {
-    await prisma.enrollment.create({
-      data: {
-        userId,
-        trainingId,
-        type: enrollmentType,
-        salesRepId: salesRepId ?? null,
-        paymentStatus: PaymentStatus.PENDING,
-        stripePaymentIntentId: paymentIntent.id,
-        paidAmount: finalAmountUsd,
-      },
+    await prisma.$transaction([
+      prisma.enrollment.update({
+        where: { id: reservation.enrollment.id },
+        data: { stripePaymentIntentId: paymentIntent.id },
+      }),
+      prisma.enrollmentPaymentAttempt.create({
+        data: { enrollmentId: reservation.enrollment.id, stripePaymentIntentId: paymentIntent.id },
+      }),
+    ]);
+  } catch (error) {
+    await prisma.enrollment.updateMany({
+      where: { id: reservation.enrollment.id, paymentStatus: PaymentStatus.PENDING },
+      data: { paymentStatus: PaymentStatus.FAILED, reservationExpiresAt: null },
     });
+    throw error;
   }
 
   return {
-    clientSecret: paymentIntent.client_secret!,
-    paymentIntentId: paymentIntent.id,
-    enrollmentType,
-    amountUsd: finalAmountUsd,
+    clientSecret: paymentIntent.client_secret!, paymentIntentId: paymentIntent.id,
+    enrollmentType: reservation.type, amountUsd: reservation.amountCents / 100,
   };
 }
 
-export async function confirmEnrollmentPayment(paymentIntentId: string) {
-  const enrollment = await prisma.enrollment.findFirst({
+export async function confirmEnrollmentPayment(paymentIntentId: string, requestingUserId?: string) {
+  const attempt = await prisma.enrollmentPaymentAttempt.findUnique({
     where: { stripePaymentIntentId: paymentIntentId },
-    include: { training: true, user: true },
+    include: { enrollment: { include: { training: true, user: true } } },
   });
-
-  if (!enrollment) throw new Error("Enrollment not found");
+  const enrollment = attempt?.enrollment ?? await prisma.enrollment.findFirst({
+    where: { stripePaymentIntentId: paymentIntentId }, include: { training: true, user: true },
+  });
+  if (!enrollment || (requestingUserId && enrollment.userId !== requestingUserId)) {
+    throw new Error("Enrollment not found");
+  }
   if (enrollment.paymentStatus === PaymentStatus.COMPLETED) {
     return { message: "Already confirmed", alreadyConfirmed: true };
+  }
+  if (enrollment.paymentStatus === PaymentStatus.REFUNDED) {
+    return { message: "Payment was refunded", alreadyConfirmed: true };
   }
 
   const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
   if (paymentIntent.status !== "succeeded") throw new Error("Payment has not succeeded");
-  if (
-    paymentIntent.currency.toLowerCase() !== "usd" ||
-    paymentIntent.amount_received !== Math.round((enrollment.paidAmount ?? 0) * 100)
-  ) {
+  if (paymentIntent.currency.toLowerCase() !== "usd" ||
+      paymentIntent.amount_received !== Math.round((enrollment.paidAmount ?? 0) * 100)) {
     throw new Error("Payment amount does not match enrollment");
   }
 
-  const creditScoreOverride = paymentIntent.metadata?.creditScore
+  const creditScore = paymentIntent.metadata?.creditScore
     ? parseInt(paymentIntent.metadata.creditScore, 10)
-    : null;
-  const creditScore = creditScoreOverride ?? enrollment.training.creditScore;
-
+    : enrollment.training.creditScore;
   const finalized = await prisma.$transaction(async (tx) => {
-    const claimed = await tx.enrollment.updateMany({
-      where: {
-        id: enrollment.id,
-        paymentStatus: { in: [PaymentStatus.PENDING, PaymentStatus.FAILED] },
-      },
-      data: { paymentStatus: PaymentStatus.COMPLETED, paidAt: new Date() },
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${enrollment.trainingId}))`;
+    const now = new Date();
+    const occupied = await tx.enrollment.count({
+      where: { trainingId: enrollment.trainingId, type: enrollment.type, id: { not: enrollment.id }, OR: [
+        { paymentStatus: PaymentStatus.COMPLETED },
+        { paymentStatus: PaymentStatus.PENDING, reservationExpiresAt: { gt: now } },
+      ] },
     });
-    if (claimed.count === 0) return false;
+    const capacity = enrollment.type === EnrollmentType.ENROLLEE
+      ? enrollment.training.maxEnrollees : enrollment.training.maxObservers;
+    if (enrollment.training.status !== TrainingStatus.ACTIVE || occupied >= capacity) return "NO_CAPACITY" as const;
 
-    if (enrollment.type === EnrollmentType.ENROLLEE && creditScore > 0) {
-      await tx.creditTransaction.create({
-        data: {
-          userId:      enrollment.userId,
-          type:        CreditTransactionType.EARNED,
-          amount:      creditScore,
-          description: `Enrolled in ${enrollment.training.title}`,
-          referenceId: enrollment.trainingId,
-        },
-      });
-      await tx.user.update({
-        where: { id: enrollment.userId },
-        data:  { creditBalance: { increment: creditScore } },
+    const claimed = await tx.enrollment.updateMany({
+      where: { id: enrollment.id, paymentStatus: { in: [PaymentStatus.PENDING, PaymentStatus.FAILED] } },
+      data: { paymentStatus: PaymentStatus.COMPLETED, paidAt: now, reservationExpiresAt: null },
+    });
+    if (claimed.count === 0) return "NOT_CLAIMED" as const;
+    if (attempt) {
+      await tx.enrollmentPaymentAttempt.update({
+        where: { id: attempt.id }, data: { status: PaymentStatus.COMPLETED },
       });
     }
-    return true;
+    if (enrollment.type === EnrollmentType.ENROLLEE && creditScore > 0) {
+      await tx.creditTransaction.create({
+        data: { userId: enrollment.userId, type: CreditTransactionType.EARNED, amount: creditScore,
+          description: `Enrolled in ${enrollment.training.title}`, referenceId: enrollment.trainingId },
+      });
+      await tx.user.update({ where: { id: enrollment.userId }, data: { creditBalance: { increment: creditScore } } });
+    }
+    return "COMPLETED" as const;
   });
 
-  if (!finalized) {
+  if (finalized === "NO_CAPACITY") {
+    const refund = await stripe.refunds.create(
+      { payment_intent: paymentIntentId },
+      { idempotencyKey: `expired-training-reservation-${paymentIntentId}` },
+    );
+    await prisma.$transaction(async (tx) => {
+      await tx.enrollment.update({
+        where: { id: enrollment.id },
+        data: { paymentStatus: PaymentStatus.REFUNDED, stripeRefundId: refund.id,
+          refundedAt: new Date(), reservationExpiresAt: null },
+      });
+      if (attempt) await tx.enrollmentPaymentAttempt.update({
+        where: { id: attempt.id }, data: { status: PaymentStatus.REFUNDED },
+      });
+    });
+    throw new Error("The seat reservation expired and the payment was refunded");
+  }
+  if (finalized === "NOT_CLAIMED") {
     const current = await prisma.enrollment.findUnique({ where: { id: enrollment.id } });
     if (current?.paymentStatus === PaymentStatus.COMPLETED) {
       return { message: "Already confirmed", alreadyConfirmed: true };
@@ -446,105 +565,165 @@ export async function confirmEnrollmentPayment(paymentIntentId: string) {
     throw new Error("Enrollment payment could not be finalized");
   }
 
-  const discountCode = paymentIntent.metadata?.discountCode;
-  if (discountCode) {
-    try {
-      await redeemDiscountCode(discountCode);
-    } catch (discountError) {
-      console.error("Failed to record discount code redemption:", discountError);
-    }
+  const redeemedCode = paymentIntent.metadata?.discountCode;
+  if (redeemedCode) {
+    try { await redeemDiscountCode(redeemedCode); }
+    catch (error) { console.error("Failed to record discount code redemption:", error); }
   }
-
   try {
     const { sendEnrollmentConfirmationEmail } = await import("./email.service");
     await sendEnrollmentConfirmationEmail({
-      to: enrollment.user.email,
-      fullName: enrollment.user.fullName,
-      training: {
-        title: enrollment.training.title,
-        scheduledAt: enrollment.training.scheduledAt as Date,
-        location: enrollment.training.location || "",
-        speaker: enrollment.training.speaker || "",
-        level: enrollment.training.level,
-      },
+      to: enrollment.user.email, fullName: enrollment.user.fullName,
+      training: { title: enrollment.training.title, scheduledAt: enrollment.training.scheduledAt as Date,
+        location: enrollment.training.location || "", speaker: enrollment.training.speaker || "",
+        level: enrollment.training.level },
       enrollmentType: enrollment.type as "ENROLLEE" | "OBSERVER",
     });
-  } catch (emailError) {
-    console.error("Failed to send enrollment confirmation email:", emailError);
-  }
-
+  } catch (error) { console.error("Failed to send enrollment confirmation email:", error); }
   return { message: "Enrollment confirmed", alreadyConfirmed: false };
 }
 
-export async function failEnrollment(paymentIntentId: string) {
-  const enrollment = await prisma.enrollment.findFirst({
-    where: {
-      stripePaymentIntentId: paymentIntentId,
-      paymentStatus: PaymentStatus.PENDING,
-    },
+export async function failEnrollment(paymentIntentId: string, requestingUserId?: string) {
+  const attempt = await prisma.enrollmentPaymentAttempt.findUnique({
+    where: { stripePaymentIntentId: paymentIntentId }, include: { enrollment: true },
+  });
+  const enrollment = attempt?.enrollment ?? await prisma.enrollment.findFirst({
+    where: { stripePaymentIntentId: paymentIntentId },
   });
   if (!enrollment) return;
-  await prisma.enrollment.update({
-    where: { id: enrollment.id },
-    data: { paymentStatus: PaymentStatus.FAILED },
+  if (requestingUserId && enrollment.userId !== requestingUserId) throw new Error("Enrollment not found");
+  if (enrollment.paymentStatus === PaymentStatus.COMPLETED) return;
+
+  const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  if (paymentIntent.status === "succeeded") return confirmEnrollmentPayment(paymentIntentId, requestingUserId);
+  if (paymentIntent.status !== "canceled") await stripe.paymentIntents.cancel(paymentIntentId);
+
+  await prisma.$transaction(async (tx) => {
+    if (attempt) await tx.enrollmentPaymentAttempt.updateMany({
+      where: { id: attempt.id, status: PaymentStatus.PENDING }, data: { status: PaymentStatus.FAILED },
+    });
+    await tx.enrollment.updateMany({
+      where: { id: enrollment.id, stripePaymentIntentId: paymentIntentId, paymentStatus: PaymentStatus.PENDING },
+      data: { paymentStatus: PaymentStatus.FAILED, reservationExpiresAt: null },
+    });
   });
 }
 
 export async function cancelTraining(trainingId: string, adminId: string) {
-  const training = await prisma.training.findUnique({ where: { id: trainingId } });
+  const training = await prisma.training.findUnique({
+    where: { id: trainingId },
+    include: { enrollments: { include: { user: true, paymentAttempts: true } } },
+  });
   if (!training) throw new Error("Training not found");
   if (training.status !== TrainingStatus.ACTIVE) throw new Error("Training is already cancelled or completed");
 
-  const enrollees = await prisma.enrollment.findMany({
-    where: { trainingId, type: EnrollmentType.ENROLLEE, paymentStatus: PaymentStatus.COMPLETED },
-    include: { user: true },
-  });
-  const observers = await prisma.enrollment.findMany({
-    where: { trainingId, type: EnrollmentType.OBSERVER, paymentStatus: PaymentStatus.COMPLETED },
-  });
+  const refunded: typeof training.enrollments = [];
+  for (const enrollment of training.enrollments) {
+    if (enrollment.paymentStatus === PaymentStatus.PENDING) {
+      for (const attempt of enrollment.paymentAttempts.filter((item) => item.status === PaymentStatus.PENDING)) {
+        const intent = await stripe.paymentIntents.retrieve(attempt.stripePaymentIntentId);
+        if (intent.status === "succeeded") {
+          throw new Error(`Payment is currently completing for ${enrollment.user.fullName}. Retry cancellation shortly.`);
+        }
+        if (intent.status !== "canceled") await stripe.paymentIntents.cancel(intent.id);
+      }
+      await prisma.$transaction([
+        prisma.enrollment.update({
+          where: { id: enrollment.id },
+          data: { paymentStatus: PaymentStatus.FAILED, reservationExpiresAt: null },
+        }),
+        prisma.enrollmentPaymentAttempt.updateMany({
+          where: { enrollmentId: enrollment.id, status: PaymentStatus.PENDING },
+          data: { status: PaymentStatus.FAILED },
+        }),
+      ]);
+      continue;
+    }
 
-  if (enrollees.length !== 1 || observers.length !== 0) {
-    throw new Error("Training can only be cancelled when there is exactly 1 paid enrollee and no observers");
+    if (enrollment.paymentStatus !== PaymentStatus.COMPLETED) continue;
+    if (!enrollment.stripePaymentIntentId) {
+      throw new Error(`No payment found for ${enrollment.user.fullName}`);
+    }
+    const refund = await stripe.refunds.create(
+      { payment_intent: enrollment.stripePaymentIntentId },
+      { idempotencyKey: `cancel-training-${trainingId}-${enrollment.id}` },
+    );
+    await prisma.$transaction([
+      prisma.enrollment.update({
+        where: { id: enrollment.id },
+        data: { paymentStatus: PaymentStatus.REFUNDED, stripeRefundId: refund.id,
+          refundedAt: new Date(), reservationExpiresAt: null },
+      }),
+      prisma.enrollmentPaymentAttempt.updateMany({
+        where: { enrollmentId: enrollment.id, status: PaymentStatus.COMPLETED },
+        data: { status: PaymentStatus.REFUNDED },
+      }),
+    ]);
+    refunded.push(enrollment);
   }
 
-  const enrollment = enrollees[0];
-  if (!enrollment.stripePaymentIntentId) throw new Error("No payment found for this enrollment");
-
-  const refund = await stripe.refunds.create({ payment_intent: enrollment.stripePaymentIntentId });
-
-  await prisma.$transaction(async (tx) => {
-    await tx.enrollment.update({
-      where: { id: enrollment.id },
-      data: {
-        paymentStatus: PaymentStatus.REFUNDED,
-        stripeRefundId: refund.id,
-        refundedAt: new Date(),
-      },
-    });
-    await tx.training.update({
-      where: { id: trainingId },
-      data: { status: TrainingStatus.CANCELLED, cancelledAt: new Date(), cancelledBy: adminId },
-    });
+  await prisma.training.update({
+    where: { id: trainingId },
+    data: { status: TrainingStatus.CANCELLED, cancelledAt: new Date(), cancelledBy: adminId },
   });
 
-  const refundAmountUsd = enrollment.paidAmount ?? 0;
-  await sendTrainingCancellationEmail(
-    enrollment.user.email,
-    enrollment.user.fullName,
-    training.title,
-    refundAmountUsd,
-  );
+  for (const enrollment of refunded) {
+    try {
+      await sendTrainingCancellationEmail(
+        enrollment.user.email, enrollment.user.fullName, training.title, enrollment.paidAmount ?? 0,
+      );
+    } catch (error) {
+      console.error("Failed to send training cancellation email:", error);
+    }
+  }
 
-  return { message: "Training cancelled and refund issued" };
+  return {
+    message: refunded.length > 0
+      ? `Training cancelled and ${refunded.length} payment${refunded.length === 1 ? "" : "s"} refunded`
+      : "Training cancelled",
+    refundedCount: refunded.length,
+  };
 }
 
 export async function getTrainingEnrollees(trainingId: string) {
-  return prisma.enrollment.findMany({
-    where: { trainingId, paymentStatus: PaymentStatus.COMPLETED },
-    include: {
-      user:     { select: { id: true, fullName: true, email: true, phoneNumber: true } },
-      salesRep: { select: { id: true, fullName: true } },
+  const [enrollments, applications] = await Promise.all([
+    prisma.enrollment.findMany({
+      where: { trainingId, paymentStatus: PaymentStatus.COMPLETED },
+      include: {
+        user:     { select: { id: true, fullName: true, email: true, phoneNumber: true } },
+        salesRep: { select: { id: true, fullName: true } },
+      },
+      orderBy: { paidAt: "asc" },
+    }),
+    prisma.trainingApplication.findMany({ where: { trainingId } }),
+  ]);
+  const applicationsByUser = new Map(applications.map((application) => [application.userId, application]));
+  return enrollments.map((enrollment) => ({
+    ...enrollment,
+    application: applicationsByUser.get(enrollment.userId) ?? null,
+  }));
+}
+
+export async function markEnrollmentCompleted(trainingId: string, enrollmentId: string, adminId: string) {
+  const enrollment = await prisma.enrollment.findFirst({
+    where: { id: enrollmentId, trainingId },
+    include: { training: true },
+  });
+  if (!enrollment) throw new Error("Enrollment not found");
+  if (enrollment.type !== EnrollmentType.ENROLLEE) throw new Error("Observer attendance cannot satisfy prerequisites");
+  if (enrollment.paymentStatus !== PaymentStatus.COMPLETED) throw new Error("Only paid enrollments can be completed");
+  if (enrollment.training.status === TrainingStatus.CANCELLED) throw new Error("Cancelled training cannot be completed");
+  if (enrollment.training.scheduledAt && enrollment.training.scheduledAt > new Date()) {
+    throw new Error("Training cannot be completed before its scheduled time");
+  }
+  if (enrollment.attendanceStatus === EnrollmentAttendanceStatus.COMPLETED) return enrollment;
+
+  return prisma.enrollment.update({
+    where: { id: enrollment.id },
+    data: {
+      attendanceStatus: EnrollmentAttendanceStatus.COMPLETED,
+      completedAt: new Date(),
+      completedBy: adminId,
     },
-    orderBy: { paidAt: "asc" },
   });
 }

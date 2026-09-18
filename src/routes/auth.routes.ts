@@ -13,5 +13,6 @@ router.post("/reset-password", authController.resetPassword);
 router.patch("/profile", authenticateToken, authController.updateProfile);
 router.patch("/profile/picture", authenticateToken, uploadProfilePicture.single("profilePicture"), authController.updateProfilePicture);
 router.patch("/change-password", authenticateToken, authController.changePassword);
+router.delete("/account", authenticateToken, authController.deleteAccount);
 
 export default router;

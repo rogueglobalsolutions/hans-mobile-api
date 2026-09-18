@@ -3,6 +3,7 @@ import { stripe } from "../config/stripe";
 import * as trainingService from "../services/training.service";
 import * as commerceService from "../services/commerce.service";
 import { sanitizeError } from "../utils/errors";
+import { EnrollmentType } from "../generated/prisma/enums";
 import type Stripe from "stripe";
 
 function paymentKind(paymentIntent: Stripe.PaymentIntent) {
@@ -23,9 +24,14 @@ export async function getConfig(req: Request, res: Response) {
 export async function createPaymentIntent(req: Request, res: Response) {
   try {
     const userId = (req as any).userId as string;
-    const { trainingId, salesRepId, subOptionIndex, discountCode } = req.body;
+    const { trainingId, salesRepId, subOptionIndex, discountCode, enrollmentType } = req.body;
     if (!trainingId) {
       res.status(400).json({ success: false, message: "trainingId is required" });
+      return;
+    }
+    const requestedType = enrollmentType ?? EnrollmentType.ENROLLEE;
+    if (requestedType !== EnrollmentType.ENROLLEE && requestedType !== EnrollmentType.OBSERVER) {
+      res.status(400).json({ success: false, message: "Invalid enrollment type" });
       return;
     }
     const result = await trainingService.initiateEnrollment(
@@ -34,9 +40,19 @@ export async function createPaymentIntent(req: Request, res: Response) {
       salesRepId,
       subOptionIndex !== undefined ? Number(subOptionIndex) : undefined,
       discountCode || undefined,
+      requestedType,
     );
     res.json({ success: true, data: result });
   } catch (err) {
+    if (err instanceof trainingService.ObserverConfirmationRequiredError) {
+      res.status(409).json({
+        success: false,
+        code: err.code,
+        message: err.message,
+        data: { observerPriceUsd: err.observerPriceUsd },
+      });
+      return;
+    }
     const msg = sanitizeError(err, "createPaymentIntent");
     const clientErrors = [
       "Training not found",
@@ -44,6 +60,7 @@ export async function createPaymentIntent(req: Request, res: Response) {
       "Training is full",
       "You must complete",
       "Already enrolled",
+      "Observer enrollment is only available",
     ];
     const status = clientErrors.some((e) => msg.includes(e)) ? 400 : 500;
     res.status(status).json({ success: false, message: msg });
@@ -57,7 +74,7 @@ export async function confirmPayment(req: Request, res: Response) {
       res.status(400).json({ success: false, message: "paymentIntentId is required" });
       return;
     }
-    const result = await trainingService.confirmEnrollmentPayment(paymentIntentId);
+    const result = await trainingService.confirmEnrollmentPayment(paymentIntentId, (req as any).userId as string);
     res.json({ success: true, data: result });
   } catch (err) {
     const msg = sanitizeError(err, "confirmPayment");
@@ -74,7 +91,7 @@ export async function failPayment(req: Request, res: Response) {
       res.status(400).json({ success: false, message: "paymentIntentId is required" });
       return;
     }
-    await trainingService.failEnrollment(paymentIntentId);
+    await trainingService.failEnrollment(paymentIntentId, (req as any).userId as string);
     res.json({ success: true, message: "Enrollment marked as failed" });
   } catch (err) {
     const msg = sanitizeError(err, "failPayment");

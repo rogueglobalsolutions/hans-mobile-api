@@ -46,6 +46,7 @@ router.patch(
 router.delete("/trainings/:id", trainingController.deleteTraining);
 router.post("/trainings/:id/cancel", trainingController.cancelTraining);
 router.get("/trainings/:id/enrollees", trainingController.getTrainingEnrollees);
+router.post("/trainings/:id/enrollments/:enrollmentId/complete", trainingController.completeEnrollment);
 
 // Training document management
 router.get("/trainings/:id/folders", trainingDocController.getFolders);
@@ -122,6 +123,7 @@ router.get("/commerce/customers", commerceController.getCustomers);
 router.get("/commerce/customers/:id", commerceController.getCustomerById);
 
 router.get("/commerce/reports/revenue", commerceController.getRevenueSummary);
+router.get("/commerce/reports/financial-summary", commerceController.getFinancialSummary);
 router.get("/commerce/reports/sales", commerceController.getSalesReport);
 router.get("/commerce/reports/orders-breakdown", commerceController.getOrdersBreakdown);
 router.get("/commerce/reports/top-products", commerceController.getTopProducts);

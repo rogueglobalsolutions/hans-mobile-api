@@ -1,14 +1,14 @@
 import { Request, Response, NextFunction } from "express";
 import { verifyToken } from "../utils/jwt";
 import prisma from "../config/prisma";
-import { Role } from "../generated/prisma/enums";
+import { AccountStatus, Role } from "../generated/prisma/enums";
 
 interface TokenPayload {
   userId: string;
   email: string;
 }
 
-export function authenticateToken(req: Request, res: Response, next: NextFunction) {
+export async function authenticateToken(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1]; // Bearer TOKEN
 
@@ -22,6 +22,15 @@ export function authenticateToken(req: Request, res: Response, next: NextFunctio
 
     if (!payload) {
       res.status(403).json({ success: false, message: "Invalid or expired token" });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: { deletedAt: true, accountStatus: true },
+    });
+    if (!user || user.deletedAt || user.accountStatus === AccountStatus.SUSPENDED) {
+      res.status(401).json({ success: false, message: "Account is no longer active" });
       return;
     }
 

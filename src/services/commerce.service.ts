@@ -19,6 +19,8 @@ import {
   Role,
   ShippingLabelStatus,
   ShippingMethod,
+  CreditReservationStatus,
+  CreditTransactionType,
 } from "../generated/prisma/enums";
 
 type DateFilterType = "today" | "this_week";
@@ -73,6 +75,7 @@ interface CreateOrderIntentInput {
   shippingMethod?: ShippingMethod;
   notes?: string;
   expectedTotalAmountCents?: number;
+  applyCredits?: boolean;
 }
 
 const ORDER_NUMBER_PREFIX = "ORD";
@@ -255,6 +258,7 @@ function formatProduct(product: any) {
     ground_shipping_only: product.groundShippingOnly,
     stripeProductId: product.stripeProductId,
     stripeDefaultPriceId: product.stripeDefaultPriceId,
+    creditEligible: product.creditEligible,
     variants: (product.variants ?? []).map((variant: any) => ({
       id: variant.id,
       variant: variant.label,
@@ -287,6 +291,9 @@ function formatOrderSummary(order: any) {
     itemCount,
     totalAmount: toDollars(order.totalAmountCents),
     totalAmountCents: order.totalAmountCents,
+    creditAppliedCents: order.creditAppliedCents ?? 0,
+    creditRefundedCents: order.creditRefundedCents ?? 0,
+    cardAmountCents: order.cardAmountCents ?? order.totalAmountCents,
     currency: order.currency,
     status: orderDisplayStatus(order),
     dashboardStatus: dashboardOrderStatus(order),
@@ -320,6 +327,9 @@ function formatOrderDetail(order: any) {
     subtotal: toDollars(order.subtotalCents),
     shippingFee: toDollars(order.shippingFeeCents),
     tax: toDollars(order.taxCents),
+    creditApplied: toDollars(order.creditAppliedCents),
+    creditRefunded: toDollars(order.creditRefundedCents),
+    cardAmount: toDollars(order.cardAmountCents ?? order.totalAmountCents),
     notes: order.notes,
     cancellationReason: order.cancellationReason,
     cancellationNote: order.cancellationNote,
@@ -565,6 +575,7 @@ interface CreateProductInput {
   fdaCleared?: boolean;
   securePackaging?: boolean;
   groundShippingOnly?: boolean;
+  creditEligible?: boolean;
   variants?: CreateProductVariantInput[];
 }
 
@@ -631,6 +642,7 @@ export async function createProduct(input: CreateProductInput) {
       fdaCleared: input.fdaCleared ?? false,
       securePackaging: input.securePackaging ?? false,
       groundShippingOnly: input.groundShippingOnly ?? false,
+      creditEligible: input.creditEligible ?? false,
       variants: validVariants.length
         ? {
             create: validVariants.map((v) => ({
@@ -674,6 +686,9 @@ export async function updateProduct(productId: string, adminId: string, input: a
           : {}),
         ...(input.stripeProductId !== undefined ? { stripeProductId: input.stripeProductId || null } : {}),
         ...(input.stripeDefaultPriceId !== undefined ? { stripeDefaultPriceId: input.stripeDefaultPriceId || null } : {}),
+        ...(input.creditEligible !== undefined
+          ? { creditEligible: input.creditEligible === true || input.creditEligible === "true" }
+          : {}),
       },
       include: {
         variants: true,
@@ -872,6 +887,22 @@ async function restoreCancelledOrderStock(tx: any, order: { paidAt: Date | null;
       await tx.productVariant.update({ where: { id: variantId }, data: { stockQty: { increment: quantity } } });
     }
   }
+}
+
+async function releaseReservedOrderCredits(tx: any, orderId: string) {
+  const reservation = await tx.creditReservation.findUnique({ where: { orderId } });
+  if (!reservation || reservation.status !== CreditReservationStatus.RESERVED) return false;
+
+  const released = await tx.creditReservation.updateMany({
+    where: { id: reservation.id, status: CreditReservationStatus.RESERVED },
+    data: { status: CreditReservationStatus.RELEASED, releasedAt: new Date() },
+  });
+  if (released.count === 0) return false;
+  await tx.user.update({
+    where: { id: reservation.userId },
+    data: { creditBalance: { increment: reservation.amount } },
+  });
+  return true;
 }
 
 export async function getOrders(filters: OrderFilters = {}) {
@@ -1125,7 +1156,6 @@ export async function refundOrder(orderId: string, adminId: string, input: any =
     include: { refunds: true, items: true },
   });
   if (!order) throw new Error("Order not found");
-  if (!order.stripePaymentIntentId) throw new Error("No payment found for this order");
   if (
     order.paymentStatus !== CommercePaymentStatus.PAID &&
     order.paymentStatus !== CommercePaymentStatus.PARTIALLY_REFUNDED
@@ -1141,11 +1171,18 @@ export async function refundOrder(orderId: string, adminId: string, input: any =
   const amountCents = Math.min(remainingCents, requestedCents ?? remainingCents);
   if (amountCents <= 0) throw new Error("Refund amount must be greater than zero");
 
-  const stripeRefund = await stripe.refunds.create({
-    payment_intent: order.stripePaymentIntentId,
-    amount: amountCents,
-    reason: input.stripeReason,
-  });
+  const remainingCreditCents = Math.max(0, order.creditAppliedCents - order.creditRefundedCents);
+  const creditRefundCents = Math.min(remainingCreditCents, Math.floor(amountCents / 100) * 100);
+  const stripeRefundCents = amountCents - creditRefundCents;
+  if (stripeRefundCents > 0 && !order.stripePaymentIntentId) {
+    throw new Error("No card payment found for this order");
+  }
+  const stripeRefund = stripeRefundCents > 0
+    ? await stripe.refunds.create(
+        { payment_intent: order.stripePaymentIntentId!, amount: stripeRefundCents, reason: input.stripeReason },
+        { idempotencyKey: `refund-order-${order.id}-${previousRefundedCents}-${amountCents}` },
+      )
+    : null;
 
   const nextPaymentStatus =
     amountCents >= remainingCents ? CommercePaymentStatus.REFUNDED : CommercePaymentStatus.PARTIALLY_REFUNDED;
@@ -1157,14 +1194,30 @@ export async function refundOrder(orderId: string, adminId: string, input: any =
         amountCents,
         reason: input.reason || null,
         status: OrderRefundStatus.SUCCEEDED,
-        stripeRefundId: stripeRefund.id,
+        stripeRefundId: stripeRefund?.id ?? null,
         requestedById: adminId,
       },
     });
+    if (creditRefundCents > 0 && order.userId) {
+      await tx.user.update({
+        where: { id: order.userId },
+        data: { creditBalance: { increment: creditRefundCents / 100 } },
+      });
+      await tx.creditTransaction.create({
+        data: {
+          userId: order.userId,
+          type: CreditTransactionType.EARNED,
+          amount: creditRefundCents / 100,
+          description: `Credit restored from refund for order ${order.orderNumber}`,
+          referenceId: order.id,
+        },
+      });
+    }
     await tx.order.update({
       where: { id: orderId },
       data: {
         paymentStatus: nextPaymentStatus,
+        creditRefundedCents: { increment: creditRefundCents },
         refundedAt: nextPaymentStatus === CommercePaymentStatus.REFUNDED ? new Date() : order.refundedAt,
       },
     });
@@ -1479,6 +1532,81 @@ export async function getRevenueSummary(input: DateRangeInput = {}) {
   };
 }
 
+async function getFinancialTotals(startDate: Date, endDate: Date) {
+  const [orders, refunds] = await Promise.all([
+    prisma.order.findMany({
+      where: {
+        paidAt: { gte: startDate, lte: endDate },
+        paymentStatus: {
+          in: [
+            CommercePaymentStatus.PAID,
+            CommercePaymentStatus.PARTIALLY_REFUNDED,
+            CommercePaymentStatus.REFUNDED,
+          ],
+        },
+      },
+      select: {
+        totalAmountCents: true,
+        cardAmountCents: true,
+        creditAppliedCents: true,
+      },
+    }),
+    prisma.orderRefund.aggregate({
+      where: {
+        status: OrderRefundStatus.SUCCEEDED,
+        createdAt: { gte: startDate, lte: endDate },
+      },
+      _sum: { amountCents: true },
+    }),
+  ]);
+
+  const grossSalesCents = orders.reduce((sum, order) => sum + order.totalAmountCents, 0);
+  const cardCollectedCents = orders.reduce(
+    (sum, order) => sum + (order.cardAmountCents ?? order.totalAmountCents - order.creditAppliedCents),
+    0,
+  );
+  const creditsRedeemedCents = orders.reduce((sum, order) => sum + order.creditAppliedCents, 0);
+  const refundsCents = refunds._sum.amountCents ?? 0;
+  const paidOrders = orders.length;
+
+  return {
+    grossSales: toDollars(grossSalesCents),
+    cardCollected: toDollars(cardCollectedCents),
+    creditsRedeemed: toDollars(creditsRedeemedCents),
+    refunds: toDollars(refundsCents),
+    netSales: toDollars(grossSalesCents - refundsCents),
+    paidOrders,
+    averageOrderValue: paidOrders ? toDollars(Math.round(grossSalesCents / paidOrders)) : 0,
+  };
+}
+
+export async function getFinancialSummary(input: DateRangeInput = {}) {
+  const range = dateRangeFromFilter(input);
+  const duration = range.endDate.getTime() - range.startDate.getTime();
+  const previousEnd = new Date(range.startDate.getTime() - 1);
+  const previousStart = new Date(previousEnd.getTime() - duration);
+
+  const [current, previous] = await Promise.all([
+    getFinancialTotals(range.startDate, range.endDate),
+    getFinancialTotals(previousStart, previousEnd),
+  ]);
+
+  return {
+    currency: "USD",
+    dateRange: {
+      startDate: range.startDate.toISOString(),
+      endDate: range.endDate.toISOString(),
+    },
+    filterType: input.filterType ?? "weekly",
+    ...current,
+    previousPeriod: {
+      grossSales: previous.grossSales,
+      netSales: previous.netSales,
+      paidOrders: previous.paidOrders,
+    },
+  };
+}
+
 export async function getSalesReport(input: DateRangeInput = {}) {
   const range = dateRangeFromFilter(input);
   const previousStart = new Date(range.startDate);
@@ -1514,7 +1642,7 @@ export async function getSalesReport(input: DateRangeInput = {}) {
     filterType: input.filterType ?? "weekly",
     totalRevenue: toDollars(totalRevenueCents),
     totalOrders: currentOrders.length,
-    averageOrderValue: currentOrders.length ? toDollars(totalRevenueCents / currentOrders.length) : 0,
+    averageOrderValue: currentOrders.length ? toDollars(Math.round(totalRevenueCents / currentOrders.length)) : 0,
     salesByDay: Array.from(buckets.entries()).map(([date, data]) => ({
       date,
       revenue: toDollars(data.revenue),
@@ -1542,14 +1670,15 @@ export async function getOrdersBreakdown(input: { startDate?: string; endDate?: 
   };
 
   for (const order of orders) {
-    const key = order.status.toLowerCase() as keyof typeof statusCounts;
-    statusCounts[key] += 1;
     if (
       order.paymentStatus === CommercePaymentStatus.REFUNDED ||
       order.paymentStatus === CommercePaymentStatus.PARTIALLY_REFUNDED
     ) {
       statusCounts.refunded += 1;
+      continue;
     }
+    const key = order.status.toLowerCase() as keyof typeof statusCounts;
+    statusCounts[key] += 1;
   }
 
   return {
@@ -1564,7 +1693,9 @@ export async function getTopProducts(input: { sortBy?: "quantity" | "revenue"; l
   const items = await prisma.orderItem.findMany({
     where: {
       order: {
-        paymentStatus: CommercePaymentStatus.PAID,
+        paymentStatus: {
+          in: [CommercePaymentStatus.PAID, CommercePaymentStatus.PARTIALLY_REFUNDED],
+        },
         ...(createdAt ? { createdAt } : {}),
       },
     },
@@ -1925,6 +2056,7 @@ async function prepareProductOrder(userId: string, input: CreateOrderIntentInput
 
   const orderItems = [];
   let subtotalCents = 0;
+  let creditEligibleSubtotalCents = 0;
   let totalWeightLbs = 0;
 
   for (const requested of requestedItems) {
@@ -1951,6 +2083,7 @@ async function prepareProductOrder(userId: string, input: CreateOrderIntentInput
     const unitPriceCents = stripePrice.unit_amount;
     const lineTotalCents = unitPriceCents * quantity;
     subtotalCents += lineTotalCents;
+    if (product.creditEligible) creditEligibleSubtotalCents += lineTotalCents;
     totalWeightLbs += (product.weightLbs ?? UPS_DEFAULT_PACKAGE_WEIGHT_LBS) * quantity;
     orderItems.push({
       productId: product.id,
@@ -1988,6 +2121,14 @@ async function prepareProductOrder(userId: string, input: CreateOrderIntentInput
   );
   const shippingFeeCents = Math.round(rate.amountUsd * 100);
   const totalAmountCents = subtotalCents + shippingFeeCents;
+  let creditAppliedCents = input.applyCredits
+    ? Math.min(user.creditBalance * 100, creditEligibleSubtotalCents)
+    : 0;
+  if (totalAmountCents - creditAppliedCents > 0 && totalAmountCents - creditAppliedCents < 50) {
+    creditAppliedCents = Math.max(0, totalAmountCents - 50);
+    creditAppliedCents = Math.floor(creditAppliedCents / 100) * 100;
+  }
+  const cardAmountCents = totalAmountCents - creditAppliedCents;
 
   return {
     user,
@@ -1995,6 +2136,9 @@ async function prepareProductOrder(userId: string, input: CreateOrderIntentInput
     subtotalCents,
     shippingFeeCents,
     totalAmountCents,
+    creditEligibleSubtotalCents,
+    creditAppliedCents,
+    cardAmountCents,
     shippingAddress1,
     shippingAddress2,
     shippingCity,
@@ -2014,6 +2158,7 @@ export async function getProductCheckoutProfile(userId: string) {
   return {
     customerName: user.fullName,
     customerPhone: user.phoneNumber,
+    creditBalance: user.creditBalance,
     shippingAddress: {
       address1: user.practiceAddressLine1 ?? user.address ?? "",
       address2: user.practiceAddressLine2 ?? "",
@@ -2032,6 +2177,10 @@ export async function quoteProductOrder(userId: string, input: CreateOrderIntent
     subtotalUsd: toDollars(prepared.subtotalCents),
     shippingFeeUsd: toDollars(prepared.shippingFeeCents),
     totalUsd: toDollars(prepared.totalAmountCents),
+    amountDueUsd: toDollars(prepared.cardAmountCents),
+    creditBalanceUsd: prepared.user.creditBalance,
+    creditEligibleSubtotalUsd: toDollars(prepared.creditEligibleSubtotalCents),
+    creditAppliedUsd: toDollars(prepared.creditAppliedCents),
     shippingMethod: prepared.shippingMethod,
     serviceName: prepared.rate.serviceName,
     shippingAddress: {
@@ -2053,6 +2202,8 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
     subtotalCents,
     shippingFeeCents,
     totalAmountCents,
+    creditAppliedCents,
+    cardAmountCents,
     shippingAddress1,
     shippingAddress2,
     shippingCity,
@@ -2065,7 +2216,7 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
 
   if (
     input.expectedTotalAmountCents != null &&
-    Math.round(Number(input.expectedTotalAmountCents)) !== totalAmountCents
+    Math.round(Number(input.expectedTotalAmountCents)) !== cardAmountCents
   ) {
     throw new Error("Order total changed");
   }
@@ -2074,27 +2225,30 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
   for (let attempt = 0; attempt < 3 && !order; attempt += 1) {
     const orderNumber = await getNextOrderNumber();
     try {
-      order = await prisma.order.create({
-        data: {
-          orderNumber,
-          userId,
-          customerName: user.fullName,
-          customerEmail: user.email,
-          customerPhone: user.phoneNumber,
-          shippingAddress1,
-          shippingAddress2,
-          shippingCity,
-          shippingState,
-          shippingZipCode,
-          shippingCountry,
-          shippingMethod,
-          subtotalCents,
-          shippingFeeCents,
-          totalAmountCents,
-          notes,
-          items: { create: orderItems },
-        },
-        include: { items: true },
+      order = await prisma.$transaction(async (tx) => {
+        if (creditAppliedCents > 0) {
+          const reserved = await tx.user.updateMany({
+            where: { id: userId, creditBalance: { gte: creditAppliedCents / 100 }, deletedAt: null },
+            data: { creditBalance: { decrement: creditAppliedCents / 100 } },
+          });
+          if (reserved.count === 0) throw new Error("Credit balance changed. Please review the updated total.");
+        }
+        const created = await tx.order.create({
+          data: {
+            orderNumber, userId, customerName: user.fullName, customerEmail: user.email,
+            customerPhone: user.phoneNumber, shippingAddress1, shippingAddress2, shippingCity,
+            shippingState, shippingZipCode, shippingCountry, shippingMethod, subtotalCents,
+            shippingFeeCents, totalAmountCents, creditAppliedCents, cardAmountCents, notes,
+            items: { create: orderItems },
+          },
+          include: { items: true },
+        });
+        if (creditAppliedCents > 0) {
+          await tx.creditReservation.create({
+            data: { userId, orderId: created.id, amount: creditAppliedCents / 100 },
+          });
+        }
+        return created;
       });
     } catch (error: any) {
       if (error?.code !== "P2002" || attempt === 2) throw error;
@@ -2104,7 +2258,7 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
 
   try {
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: totalAmountCents,
+      amount: cardAmountCents,
       currency: "usd",
       metadata: { kind: "product_order", orderId: order.id, orderNumber: order.orderNumber, userId },
       payment_method_types: ["card"],
@@ -2120,12 +2274,17 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
       paymentIntentId: paymentIntent.id,
       orderId: order.id,
       orderNumber: order.orderNumber,
-      amountUsd: toDollars(totalAmountCents),
+      amountUsd: toDollars(cardAmountCents),
       subtotalUsd: toDollars(subtotalCents),
       shippingFeeUsd: toDollars(shippingFeeCents),
+      totalUsd: toDollars(totalAmountCents),
+      creditAppliedUsd: toDollars(creditAppliedCents),
     };
   } catch (error) {
-    await prisma.order.delete({ where: { id: order.id } }).catch(() => undefined);
+    await prisma.$transaction(async (tx) => {
+      await releaseReservedOrderCredits(tx, order.id);
+      await tx.order.delete({ where: { id: order.id } });
+    }).catch(() => undefined);
     throw error;
   }
 }
@@ -2142,7 +2301,7 @@ async function finalizeProductOrderPayment(paymentIntent: Stripe.PaymentIntent, 
   if (paymentIntent.status !== "succeeded") throw new Error("Payment has not succeeded");
   if (
     paymentIntent.currency.toLowerCase() !== order.currency.toLowerCase() ||
-    paymentIntent.amount_received !== order.totalAmountCents
+    paymentIntent.amount_received !== (order.cardAmountCents ?? order.totalAmountCents)
   ) {
     throw new Error("Payment amount does not match order");
   }
@@ -2164,6 +2323,23 @@ async function finalizeProductOrderPayment(paymentIntent: Stripe.PaymentIntent, 
       },
     });
     if (claim.count === 0) return false;
+
+    const appliedReservation = await tx.creditReservation.updateMany({
+      where: { orderId: order.id, status: CreditReservationStatus.RESERVED },
+      data: { status: CreditReservationStatus.APPLIED, appliedAt: new Date() },
+    });
+    if ((order.creditAppliedCents ?? 0) > 0 && appliedReservation.count !== 1) {
+      throw new Error("Order credit reservation is missing");
+    }
+    if (appliedReservation.count === 1) {
+      await tx.creditTransaction.create({
+        data: {
+          userId: order.userId!, type: CreditTransactionType.SPENT,
+          amount: order.creditAppliedCents / 100,
+          description: `Applied to order ${order.orderNumber}`, referenceId: order.id,
+        },
+      });
+    }
 
     const productQuantities = new Map<string, number>();
     const variantQuantities = new Map<string, number>();
@@ -2248,11 +2424,11 @@ export async function discardProductOrderIntent(userId: string, paymentIntentId:
     await stripe.paymentIntents.cancel(paymentIntentId);
   }
 
-  await prisma.order.deleteMany({
-    where: {
-      id: order.id,
-      paymentStatus: { not: CommercePaymentStatus.PAID },
-    },
+  await prisma.$transaction(async (tx) => {
+    await releaseReservedOrderCredits(tx, order.id);
+    await tx.order.deleteMany({
+      where: { id: order.id, paymentStatus: { not: CommercePaymentStatus.PAID } },
+    });
   });
   return { discarded: true };
 }
@@ -2277,6 +2453,7 @@ export async function failProductOrderPaymentFromWebhook(paymentIntentId: string
       },
     });
     if (updated.count === 0) return;
+    await releaseReservedOrderCredits(tx, order.id);
     await tx.orderStatusHistory.create({
       data: {
         orderId: order.id,

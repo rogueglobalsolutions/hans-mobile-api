@@ -61,6 +61,23 @@ enum PaymentStatus {
   FAILED
 }
 
+enum TrainingApplicationStatus {
+  DRAFT
+  SUBMITTED
+}
+
+enum EnrollmentAttendanceStatus {
+  PENDING
+  COMPLETED
+  NO_SHOW
+}
+
+enum CreditReservationStatus {
+  RESERVED
+  APPLIED
+  RELEASED
+}
+
 enum CreditTransactionType {
   EARNED // Credit added — e.g. enrolled in a training
   SPENT // Credit deducted — e.g. store purchase
@@ -177,6 +194,7 @@ model User {
   // Agreements
   agreedToTerms            Boolean               @default(false)
   subscribedToUpdates      Boolean               @default(false)
+  deletedAt                DateTime?
   createdAt                DateTime              @default(now())
   updatedAt                DateTime              @updatedAt
   otps                     Otp[]
@@ -195,6 +213,9 @@ model User {
   commerceRefundRequests   OrderRefund[]         @relation("CommerceRefundRequester")
   shippingLabelRequests    ShippingLabel[]       @relation("ShippingLabelRequester")
   stockAdjustments         StockAuditLog[]       @relation("StockAdjustedBy")
+  trainingApplications     TrainingApplication[] @relation("TrainingApplicationUser")
+  referredApplications     TrainingApplication[] @relation("TrainingApplicationSalesRep")
+  creditReservations       CreditReservation[]
 }
 
 model Otp {
@@ -237,6 +258,30 @@ model Training {
   updatedAt           DateTime         @updatedAt
   enrollments         Enrollment[]
   folders             TrainingFolder[]
+  applications        TrainingApplication[]
+}
+
+model TrainingApplication {
+  id                      String                    @id @default(uuid())
+  userId                  String
+  user                    User                      @relation("TrainingApplicationUser", fields: [userId], references: [id], onDelete: Cascade)
+  trainingId              String
+  training                Training                  @relation(fields: [trainingId], references: [id], onDelete: Cascade)
+  salesRepId              String?
+  salesRep                User?                     @relation("TrainingApplicationSalesRep", fields: [salesRepId], references: [id], onDelete: SetNull)
+  prequalificationAnswers Json?
+  registrationDetails     Json?
+  backgroundCheckAnswers  Json?
+  termsVersion            String?
+  termsAcceptedAt         DateTime?
+  submittedAt             DateTime?
+  status                  TrainingApplicationStatus @default(DRAFT)
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
+
+  @@unique([userId, trainingId])
+  @@index([trainingId, status])
+  @@index([salesRepId])
 }
 
 model Enrollment {
@@ -254,9 +299,26 @@ model Enrollment {
   paidAmount            Int? // USD dollars
   paidAt                DateTime?
   refundedAt            DateTime?
+  reservationExpiresAt  DateTime?
+  attendanceStatus      EnrollmentAttendanceStatus @default(PENDING)
+  completedAt           DateTime?
+  completedBy           String?
   enrolledAt            DateTime       @default(now())
+  paymentAttempts       EnrollmentPaymentAttempt[]
 
   @@unique([userId, trainingId])
+}
+
+model EnrollmentPaymentAttempt {
+  id                    String        @id @default(uuid())
+  enrollmentId          String
+  enrollment            Enrollment    @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  stripePaymentIntentId String        @unique
+  status                PaymentStatus @default(PENDING)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  @@index([enrollmentId, status])
 }
 
 model CreditTransaction {
@@ -303,6 +365,7 @@ model Product {
   images               ProductImage[]
   orderItems           OrderItem[]
   stockAuditLogs       StockAuditLog[]
+  creditEligible       Boolean          @default(false)
 
   @@index([status])
   @@index([vendor])
@@ -356,6 +419,9 @@ model Order {
   shippingFeeCents          Int                     @default(0)
   taxCents                  Int                     @default(0)
   totalAmountCents          Int
+  creditAppliedCents        Int                     @default(0)
+  creditRefundedCents       Int                     @default(0)
+  cardAmountCents           Int?
   currency                  String                  @default("USD")
   status                    CommerceOrderStatus     @default(PENDING)
   paymentStatus             CommercePaymentStatus   @default(PENDING)
@@ -389,6 +455,7 @@ model Order {
   statusHistory             OrderStatusHistory[]
   refunds                   OrderRefund[]
   shippingLabels            ShippingLabel[]
+  creditReservation         CreditReservation?
 
   @@index([userId])
   @@index([status])
@@ -397,6 +464,22 @@ model Order {
   @@index([createdAt])
   @@index([archivedAt])
   @@index([cancellationRequested])
+}
+
+model CreditReservation {
+  id         String                  @id @default(uuid())
+  userId     String
+  user       User                    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  orderId    String                  @unique
+  order      Order                   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amount     Int
+  status     CreditReservationStatus @default(RESERVED)
+  appliedAt  DateTime?
+  releasedAt DateTime?
+  createdAt  DateTime                @default(now())
+  updatedAt  DateTime                @updatedAt
+
+  @@index([userId, status])
 }
 
 model OrderItem {

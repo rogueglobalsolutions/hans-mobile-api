@@ -36,6 +36,7 @@ const SAFE_MESSAGES: Record<string, string> = {
   "Training not found": "Training not found.",
   "Training is not available for enrollment": "This training is not available for enrollment.",
   "Training is full": "This training is full. No more slots available.",
+  "Observer enrollment is only available when enrollee seats are full": "Observer enrollment is only available when enrollee seats are full.",
   "Already enrolled in this training": "You are already enrolled in this training.",
   "You must complete a Mint Lift Group Training or Supplemental training first": "You must complete a Mint Lift Group Training or Supplemental training first.",
   "Enrollment not found": "Enrollment not found.",

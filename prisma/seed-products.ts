@@ -98,6 +98,7 @@ async function main() {
           fdaCleared: sanitizeValue(first.fda_cleared) === "yes",
           securePackaging: sanitizeValue(first.secure_packaging) === "yes",
           groundShippingOnly: sanitizeValue(first.ground_shipping_only) === "yes",
+          creditEligible: vendorName.toLowerCase() === "mint",
           stripeProductId,
           stripeDefaultPriceId,
           images: assetPath
@@ -134,6 +135,7 @@ async function main() {
           fdaCleared: sanitizeValue(first.fda_cleared) === "yes",
           securePackaging: sanitizeValue(first.secure_packaging) === "yes",
           groundShippingOnly: sanitizeValue(first.ground_shipping_only) === "yes",
+          creditEligible: vendorName.toLowerCase() === "mint",
           stripeProductId,
           stripeDefaultPriceId,
         },

@@ -412,3 +412,21 @@ export async function getTrainingEnrollees(req: Request, res: Response) {
     return res.status(500).json({ success: false, message: "Failed to retrieve enrollees" });
   }
 }
+
+export async function completeEnrollment(req: Request, res: Response) {
+  try {
+    const data = await trainingService.markEnrollmentCompleted(
+      req.params.id as string,
+      req.params.enrollmentId as string,
+      (req as any).userId as string,
+    );
+    return res.json({ success: true, message: "Enrollment marked completed", data });
+  } catch (err: any) {
+    const knownErrors = ["Enrollment not found", "Observer attendance", "Only paid", "Cancelled training", "scheduled time"];
+    if (knownErrors.some((message) => err.message?.includes(message))) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
+    console.error("[completeEnrollment]", err);
+    return res.status(500).json({ success: false, message: "Failed to complete enrollment" });
+  }
+}

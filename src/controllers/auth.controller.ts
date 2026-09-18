@@ -188,6 +188,20 @@ export async function updateProfile(req: Request, res: Response) {
   }
 }
 
+export async function deleteAccount(req: Request, res: Response) {
+  try {
+    const currentPassword = String(req.body.currentPassword || "");
+    if (!currentPassword) {
+      res.status(400).json({ success: false, message: "Current password is required" });
+      return;
+    }
+    const result = await authService.deleteAccount((req as any).userId as string, currentPassword);
+    res.json({ success: true, message: result.message });
+  } catch (error) {
+    res.status(400).json({ success: false, message: sanitizeError(error, "deleteAccount") });
+  }
+}
+
 export async function forgotPassword(req: Request, res: Response) {
   try {
     const { email } = req.body;
