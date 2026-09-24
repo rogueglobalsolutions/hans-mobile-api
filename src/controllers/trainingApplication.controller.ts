@@ -33,11 +33,10 @@ export async function submitApplication(req: Request, res: Response) {
     const data = await applicationService.submitTrainingApplication(
       (req as any).userId,
       trainingId(req),
-      String(req.body.termsVersion || "training-terms-v1"),
+      String(req.body.termsVersion || "training-terms-v2"),
     );
     res.json({ success: true, data });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "submitTrainingApplication") });
   }
 }
-

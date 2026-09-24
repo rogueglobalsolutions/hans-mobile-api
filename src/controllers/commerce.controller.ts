@@ -542,6 +542,10 @@ export async function confirmProductOrderPayment(req: Request, res: Response) {
       return;
     }
     const data = await commerceService.confirmProductOrderPayment(userId, req.body.paymentIntentId);
+    if ("refunded" in data && data.refunded) {
+      res.status(409).json({ success: false, message: data.message, data });
+      return;
+    }
     res.json({ success: true, data });
   } catch (err) {
     sendError(res, err, "confirmProductOrderPayment", 400);

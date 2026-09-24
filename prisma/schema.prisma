@@ -57,6 +57,7 @@ enum EnrollmentType {
 enum PaymentStatus {
   PENDING
   COMPLETED
+  PARTIALLY_REFUNDED
   REFUNDED
   FAILED
 }
@@ -72,6 +73,25 @@ enum EnrollmentAttendanceStatus {
   NO_SHOW
 }
 
+enum EnrollmentStatus {
+  ACTIVE
+  CANCELLED
+  RESCHEDULED
+}
+
+enum TrainingRequestType {
+  CANCELLATION
+  RESCHEDULE
+}
+
+enum TrainingRequestStatus {
+  PENDING
+  PAYMENT_REQUIRED
+  APPROVED
+  DECLINED
+  CANCELLED
+}
+
 enum CreditReservationStatus {
   RESERVED
   APPLIED
@@ -81,6 +101,7 @@ enum CreditReservationStatus {
 enum CreditTransactionType {
   EARNED // Credit added — e.g. enrolled in a training
   SPENT // Credit deducted — e.g. store purchase
+  EXPIRED
 }
 
 enum ProductStatus {
@@ -156,21 +177,21 @@ enum AppointmentStatus {
 }
 
 model User {
-  id                       String                @id @default(uuid())
+  id                       String                  @id @default(uuid())
   fullName                 String
-  email                    String                @unique
-  phoneNumber              String                @unique
+  email                    String                  @unique
+  phoneNumber              String                  @unique
   password                 String
-  role                     Role                  @default(USER)
-  accountStatus            AccountStatus         @default(ACTIVE)
-  hasSubmittedVerification Boolean               @default(false)
+  role                     Role                    @default(USER)
+  accountStatus            AccountStatus           @default(ACTIVE)
+  hasSubmittedVerification Boolean                 @default(false)
   medicalLicenseNumber     String?
   idDocumentFrontPath      String?
   idDocumentBackPath       String?
   verificationNotes        String?
   verifiedAt               DateTime?
   verifiedBy               String?
-  creditBalance            Int                   @default(0) // Running credit score balance
+  creditBalance            Int                     @default(0) // Running credit score balance
   profilePicturePath       String?
   country                  String?
   city                     String?
@@ -192,30 +213,32 @@ model User {
   practicePhone            String?
   isExistingCustomer       Boolean?
   // Agreements
-  agreedToTerms            Boolean               @default(false)
-  subscribedToUpdates      Boolean               @default(false)
+  agreedToTerms            Boolean                 @default(false)
+  subscribedToUpdates      Boolean                 @default(false)
   deletedAt                DateTime?
-  createdAt                DateTime              @default(now())
-  updatedAt                DateTime              @updatedAt
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
   otps                     Otp[]
   enrollments              Enrollment[]
-  salesRepEnrollments      Enrollment[]          @relation("SalesRepEnrollments")
+  salesRepEnrollments      Enrollment[]            @relation("SalesRepEnrollments")
   creditTransactions       CreditTransaction[]
   chatMessages             ChatMessage[]
-  appointments             Appointment[]         @relation("MedAppointments")
-  salesRepAppointments     Appointment[]         @relation("SalesRepAppointments")
-  baEntries                BeforeAndAfterEntry[] @relation("UserBAEntries")
-  contestEntries           ContestEntry[]        @relation("UserContestEntries")
-  contestLikes             ContestLike[]         @relation("AdminContestLikes")
-  commerceOrders           Order[]               @relation("CommerceCustomerOrders")
-  verifiedCommerceOrders   Order[]               @relation("CommerceOrderVerifier")
-  commerceStatusUpdates    OrderStatusHistory[]  @relation("CommerceStatusUpdatedBy")
-  commerceRefundRequests   OrderRefund[]         @relation("CommerceRefundRequester")
-  shippingLabelRequests    ShippingLabel[]       @relation("ShippingLabelRequester")
-  stockAdjustments         StockAuditLog[]       @relation("StockAdjustedBy")
-  trainingApplications     TrainingApplication[] @relation("TrainingApplicationUser")
-  referredApplications     TrainingApplication[] @relation("TrainingApplicationSalesRep")
+  appointments             Appointment[]           @relation("MedAppointments")
+  salesRepAppointments     Appointment[]           @relation("SalesRepAppointments")
+  baEntries                BeforeAndAfterEntry[]   @relation("UserBAEntries")
+  contestEntries           ContestEntry[]          @relation("UserContestEntries")
+  contestLikes             ContestLike[]           @relation("AdminContestLikes")
+  commerceOrders           Order[]                 @relation("CommerceCustomerOrders")
+  verifiedCommerceOrders   Order[]                 @relation("CommerceOrderVerifier")
+  commerceStatusUpdates    OrderStatusHistory[]    @relation("CommerceStatusUpdatedBy")
+  commerceRefundRequests   OrderRefund[]           @relation("CommerceRefundRequester")
+  shippingLabelRequests    ShippingLabel[]         @relation("ShippingLabelRequester")
+  stockAdjustments         StockAuditLog[]         @relation("StockAdjustedBy")
+  trainingApplications     TrainingApplication[]   @relation("TrainingApplicationUser")
+  referredApplications     TrainingApplication[]   @relation("TrainingApplicationSalesRep")
   creditReservations       CreditReservation[]
+  creditGrants             CreditGrant[]
+  reviewedTrainingRequests TrainingChangeRequest[] @relation("TrainingRequestReviewer")
 }
 
 model Otp {
@@ -229,36 +252,39 @@ model Otp {
 }
 
 model Training {
-  id                  String           @id @default(uuid())
-  type                TrainingType
-  brand               TrainingBrand
-  level               TrainingLevel
-  learningFormats     Json // String[] — validated values: "DEMO" | "DIDACTIC" | "DISCUSSION"
-  title               String
-  speaker             String
-  speakerIntro        String
-  speakerImagePath    String?
-  productsUsed        String?
-  areasCovered        String
-  description         String
-  backgroundImagePath String?
-  location            String? // e.g. "Morristown, NJ"
-  scheduledAt         DateTime? // When the training is scheduled
-  price               Int // USD — auto-populated from level at creation
-  creditScore         Int // In-house currency earned on enrollment — auto-populated from level
-  subOptions          Json? // nullable — only for MINT_LIFT_GROUP_TRAINING
-  status              TrainingStatus   @default(ACTIVE)
-  maxEnrollees        Int              @default(4)
-  maxObservers        Int              @default(2)
-  observerPrice       Int              @default(500) // USD
-  cancelledAt         DateTime?
-  cancelledBy         String? // admin userId
-  createdBy           String // admin userId
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
-  enrollments         Enrollment[]
-  folders             TrainingFolder[]
-  applications        TrainingApplication[]
+  id                      String                  @id @default(uuid())
+  type                    TrainingType
+  brand                   TrainingBrand
+  level                   TrainingLevel
+  learningFormats         Json // String[] — validated values: "DEMO" | "DIDACTIC" | "DISCUSSION"
+  title                   String
+  speaker                 String
+  speakerIntro            String
+  speakerImagePath        String?
+  productsUsed            String?
+  areasCovered            String
+  description             String
+  backgroundImagePath     String?
+  location                String? // e.g. "Morristown, NJ"
+  scheduledAt             DateTime? // When the training is scheduled
+  endsAt                  DateTime? // Final session date/time; defaults to scheduledAt for single-day training
+  price                   Int // USD — auto-populated from level at creation
+  creditScore             Int // In-house currency earned on enrollment — auto-populated from level
+  subOptions              Json? // nullable — only for MINT_LIFT_GROUP_TRAINING
+  status                  TrainingStatus          @default(ACTIVE)
+  maxEnrollees            Int                     @default(4)
+  maxObservers            Int                     @default(2)
+  observerPrice           Int                     @default(500) // USD
+  cancelledAt             DateTime?
+  cancelledBy             String? // admin userId
+  createdBy               String // admin userId
+  createdAt               DateTime                @default(now())
+  updatedAt               DateTime                @updatedAt
+  enrollments             Enrollment[]
+  folders                 TrainingFolder[]
+  applications            TrainingApplication[]
+  originalChangeRequests  TrainingChangeRequest[] @relation("OriginalTrainingRequests")
+  requestedChangeRequests TrainingChangeRequest[] @relation("RequestedTrainingRequests")
 }
 
 model TrainingApplication {
@@ -276,8 +302,8 @@ model TrainingApplication {
   termsAcceptedAt         DateTime?
   submittedAt             DateTime?
   status                  TrainingApplicationStatus @default(DRAFT)
-  createdAt               DateTime                   @default(now())
-  updatedAt               DateTime                   @updatedAt
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
 
   @@unique([userId, trainingId])
   @@index([trainingId, status])
@@ -285,26 +311,37 @@ model TrainingApplication {
 }
 
 model Enrollment {
-  id                    String         @id @default(uuid())
-  userId                String
-  user                  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  trainingId            String
-  training              Training       @relation(fields: [trainingId], references: [id], onDelete: Cascade)
-  type                  EnrollmentType @default(ENROLLEE)
-  salesRepId            String?
-  salesRep              User?          @relation("SalesRepEnrollments", fields: [salesRepId], references: [id], onDelete: SetNull)
-  paymentStatus         PaymentStatus  @default(PENDING)
-  stripePaymentIntentId String?
-  stripeRefundId        String?
-  paidAmount            Int? // USD dollars
-  paidAt                DateTime?
-  refundedAt            DateTime?
-  reservationExpiresAt  DateTime?
-  attendanceStatus      EnrollmentAttendanceStatus @default(PENDING)
-  completedAt           DateTime?
-  completedBy           String?
-  enrolledAt            DateTime       @default(now())
-  paymentAttempts       EnrollmentPaymentAttempt[]
+  id                          String                     @id @default(uuid())
+  userId                      String
+  user                        User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trainingId                  String
+  training                    Training                   @relation(fields: [trainingId], references: [id], onDelete: Cascade)
+  type                        EnrollmentType             @default(ENROLLEE)
+  salesRepId                  String?
+  salesRep                    User?                      @relation("SalesRepEnrollments", fields: [salesRepId], references: [id], onDelete: SetNull)
+  paymentStatus               PaymentStatus              @default(PENDING)
+  stripePaymentIntentId       String?
+  stripeRefundId              String?
+  paidAmount                  Int? // USD dollars
+  trainingPriceAmount         Int? // Undiscounted USD price captured at registration
+  paidAt                      DateTime?
+  refundedAt                  DateTime?
+  reservationExpiresAt        DateTime?
+  attendanceStatus            EnrollmentAttendanceStatus @default(PENDING)
+  status                      EnrollmentStatus           @default(ACTIVE)
+  creditAmount                Int                        @default(0)
+  creditIssuedAt              DateTime?
+  creditExpiresAt             DateTime?
+  completedAt                 DateTime?
+  completedBy                 String?
+  rescheduleCount             Int                        @default(0)
+  noShowFeeAmount             Int?
+  noShowFeeStatus             PaymentStatus?
+  noShowStripePaymentIntentId String?
+  enrolledAt                  DateTime                   @default(now())
+  paymentAttempts             EnrollmentPaymentAttempt[]
+  changeRequests              TrainingChangeRequest[]
+  creditGrant                 CreditGrant?
 
   @@unique([userId, trainingId])
 }
@@ -330,6 +367,57 @@ model CreditTransaction {
   description String // Human-readable e.g. "Enrolled in Advanced PDO Thread Techniques"
   referenceId String? // Optional — trainingId, orderId, etc.
   createdAt   DateTime              @default(now())
+}
+
+model CreditGrant {
+  id              String                        @id @default(uuid())
+  userId          String
+  user            User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  enrollmentId    String?                       @unique
+  enrollment      Enrollment?                   @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  sourceKey       String                        @unique
+  amount          Int
+  remainingAmount Int
+  expiresAt       DateTime?
+  expiredAt       DateTime?
+  createdAt       DateTime                      @default(now())
+  updatedAt       DateTime                      @updatedAt
+  allocations     CreditReservationAllocation[]
+
+  @@index([userId, expiresAt])
+  @@index([userId, remainingAmount])
+}
+
+model TrainingChangeRequest {
+  id                     String                @id @default(uuid())
+  enrollmentId           String
+  enrollment             Enrollment            @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  originalTrainingId     String
+  originalTraining       Training              @relation("OriginalTrainingRequests", fields: [originalTrainingId], references: [id], onDelete: Cascade)
+  requestedTrainingId    String?
+  requestedTraining      Training?             @relation("RequestedTrainingRequests", fields: [requestedTrainingId], references: [id], onDelete: SetNull)
+  type                   TrainingRequestType
+  status                 TrainingRequestStatus @default(PENDING)
+  reason                 String
+  emergencyDetails       String?
+  supportingDocumentPath String?
+  feeAmount              Int                   @default(0)
+  feePaymentStatus       PaymentStatus?
+  stripePaymentIntentId  String?               @unique
+  stripeRefundId         String?
+  refundAmount           Int?
+  penaltyAmount          Int?
+  emergencyWaived        Boolean               @default(false)
+  adminNote              String?
+  reviewedById           String?
+  reviewedBy             User?                 @relation("TrainingRequestReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt             DateTime?
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+
+  @@index([enrollmentId, status])
+  @@index([originalTrainingId, status])
+  @@index([requestedTrainingId])
 }
 
 model Product {
@@ -467,19 +555,34 @@ model Order {
 }
 
 model CreditReservation {
-  id         String                  @id @default(uuid())
-  userId     String
-  user       User                    @relation(fields: [userId], references: [id], onDelete: Restrict)
-  orderId    String                  @unique
-  order      Order                   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  amount     Int
-  status     CreditReservationStatus @default(RESERVED)
-  appliedAt  DateTime?
-  releasedAt DateTime?
-  createdAt  DateTime                @default(now())
-  updatedAt  DateTime                @updatedAt
+  id          String                        @id @default(uuid())
+  userId      String
+  user        User                          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  orderId     String                        @unique
+  order       Order                         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amount      Int
+  status      CreditReservationStatus       @default(RESERVED)
+  appliedAt   DateTime?
+  releasedAt  DateTime?
+  createdAt   DateTime                      @default(now())
+  updatedAt   DateTime                      @updatedAt
+  allocations CreditReservationAllocation[]
 
   @@index([userId, status])
+}
+
+model CreditReservationAllocation {
+  id             String            @id @default(uuid())
+  reservationId  String
+  reservation    CreditReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  grantId        String
+  grant          CreditGrant       @relation(fields: [grantId], references: [id], onDelete: Restrict)
+  amount         Int
+  refundedAmount Int               @default(0)
+  createdAt      DateTime          @default(now())
+
+  @@unique([reservationId, grantId])
+  @@index([grantId])
 }
 
 model OrderItem {

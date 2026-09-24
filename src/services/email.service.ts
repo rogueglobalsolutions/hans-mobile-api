@@ -287,6 +287,69 @@ export async function sendEnrollmentConfirmationEmail(data: EnrollmentEmailData)
   }
 }
 
+export async function sendTrainingLifecycleEmail(input: {
+  to: string;
+  fullName: string;
+  subject: string;
+  heading: string;
+  message: string;
+  trainingTitle: string;
+}): Promise<boolean> {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+    console.log("\n========== TRAINING UPDATE EMAIL ==========");
+    console.log(`To: ${input.to}`);
+    console.log(`Subject: ${input.subject}`);
+    console.log(`Training: ${input.trainingTitle}`);
+    console.log(input.message);
+    console.log("===========================================\n");
+    return true;
+  }
+  try {
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+      to: input.to,
+      subject: input.subject,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; color: #27364b;">
+          <h2 style="color: #15355E;">${input.heading}</h2>
+          <p>Hi ${input.fullName},</p>
+          <p>${input.message}</p>
+          <div style="background: #f0f4ff; border-radius: 8px; padding: 16px; margin: 20px 0;">
+            <strong>${input.trainingTitle}</strong>
+          </div>
+          <p style="color: #666; font-size: 14px; margin-top: 30px;">Hans Biomed USA, Inc.</p>
+        </div>
+      `,
+    });
+    return true;
+  } catch (error) {
+    console.error("Failed to send training lifecycle email:", error);
+    return false;
+  }
+}
+
+export async function sendTrainingCreditIssuedEmail(input: {
+  to: string;
+  fullName: string;
+  trainingTitle: string;
+  amount: number;
+  expiresAt: Date;
+}): Promise<boolean> {
+  const expiration = input.expiresAt.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+  return sendTrainingLifecycleEmail({
+    to: input.to,
+    fullName: input.fullName,
+    subject: "Your MINT Lift Product Credits Are Available",
+    heading: "Training Completed",
+    trainingTitle: input.trainingTitle,
+    message: `Your course completion has been confirmed. $${input.amount.toLocaleString("en-US")} in MINT Lift product credits is now available and may be used across eligible purchases through ${expiration}.`,
+  });
+}
+
 export async function sendVerificationStatusEmail(
   to: string,
   status: "approved" | "rejected",

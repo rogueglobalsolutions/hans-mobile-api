@@ -66,6 +66,7 @@ export async function createTraining(req: Request, res: Response) {
       description,
       location,
       scheduledAt: scheduledAtRaw,
+      endsAt: endsAtRaw,
       subOptions: subOptionsRaw,
     } = req.body;
 
@@ -91,6 +92,19 @@ export async function createTraining(req: Request, res: Response) {
         errors.push("scheduledAt must be a valid ISO 8601 date string");
         scheduledAt = undefined;
       }
+    }
+    let endsAt: Date | undefined;
+    if (endsAtRaw) {
+      endsAt = new Date(endsAtRaw);
+      if (isNaN(endsAt.getTime())) {
+        errors.push("endsAt must be a valid ISO 8601 date string");
+        endsAt = undefined;
+      }
+    } else {
+      endsAt = scheduledAt;
+    }
+    if (scheduledAt && endsAt && endsAt < scheduledAt) {
+      errors.push("endsAt cannot be before scheduledAt");
     }
 
     // Enum label validation
@@ -165,6 +179,7 @@ export async function createTraining(req: Request, res: Response) {
       backgroundImagePath,
       location:        location?.trim(),
       scheduledAt,
+      endsAt,
       price,
       creditScore,
       createdBy:       adminId,
@@ -201,6 +216,7 @@ export async function updateTraining(req: Request, res: Response) {
       description,
       location,
       scheduledAt: scheduledAtRaw,
+      endsAt: endsAtRaw,
       subOptions: subOptionsRaw,
     } = req.body;
 
@@ -268,6 +284,21 @@ export async function updateTraining(req: Request, res: Response) {
         }
       }
     }
+    let endsAt: Date | null | undefined;
+    if (endsAtRaw !== undefined) {
+      if (endsAtRaw === null || endsAtRaw === "") {
+        endsAt = null;
+      } else {
+        endsAt = new Date(endsAtRaw);
+        if (isNaN(endsAt.getTime())) {
+          errors.push("endsAt must be a valid ISO 8601 date string");
+          endsAt = undefined;
+        }
+      }
+    }
+    if (scheduledAt instanceof Date && endsAt instanceof Date && endsAt < scheduledAt) {
+      errors.push("endsAt cannot be before scheduledAt");
+    }
 
     // subOptions — optional
     const subOptions = subOptionsRaw !== undefined
@@ -300,6 +331,7 @@ export async function updateTraining(req: Request, res: Response) {
       ...(location?.trim()     && { location: location.trim() }),
       ...(productsUsed !== undefined && { productsUsed: productsUsed?.trim() || null }),
       ...(scheduledAt  !== undefined && { scheduledAt }),
+      ...(endsAt       !== undefined && { endsAt }),
       ...(backgroundImagePath  && { backgroundImagePath }),
       ...(subOptions   !== undefined && { subOptions }),
     });
@@ -389,6 +421,7 @@ export async function cancelTraining(req: Request, res: Response) {
     const knownErrors = [
       "Training not found",
       "Training is already cancelled",
+      "Completed training sessions",
       "Training can only be cancelled",
       "No payment found",
     ];
@@ -422,7 +455,14 @@ export async function completeEnrollment(req: Request, res: Response) {
     );
     return res.json({ success: true, message: "Enrollment marked completed", data });
   } catch (err: any) {
-    const knownErrors = ["Enrollment not found", "Observer attendance", "Only paid", "Cancelled training", "scheduled time"];
+    const knownErrors = [
+      "Enrollment not found",
+      "Observer attendance",
+      "Only paid",
+      "Cancelled training",
+      "Cancelled enrollment",
+      "final session",
+    ];
     if (knownErrors.some((message) => err.message?.includes(message))) {
       return res.status(400).json({ success: false, message: err.message });
     }

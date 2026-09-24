@@ -112,7 +112,7 @@ export async function submitTrainingApplication(
   return prisma.trainingApplication.update({
     where: { id: application.id },
     data: {
-      termsVersion: termsVersion.trim() || "training-terms-v1",
+      termsVersion: termsVersion.trim() || "training-terms-v2",
       termsAcceptedAt: now,
       submittedAt: now,
       status: TrainingApplicationStatus.SUBMITTED,

@@ -70,6 +70,37 @@ export const uploadTrainingBg = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB — backgrounds can be larger
 });
 
+// ─── Training cancellation supporting documents ─────────────────────────────
+
+const trainingRequestsDir = path.join(process.cwd(), "uploads", "training-requests");
+if (!fs.existsSync(trainingRequestsDir)) {
+  fs.mkdirSync(trainingRequestsDir, { recursive: true });
+}
+
+const trainingRequestStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, trainingRequestsDir),
+  filename: (req, file, cb) => {
+    const userId = (req as any).userId || "unknown";
+    const ext = path.extname(file.originalname);
+    cb(null, `${userId}_request_${Date.now()}${ext}`);
+  },
+});
+
+export const uploadTrainingRequestDocument = multer({
+  storage: trainingRequestStorage,
+  fileFilter: (_req, file, cb) => {
+    const allowed = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "application/pdf",
+    ];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error("Supporting document must be a PDF, JPEG, PNG, or WebP file."));
+  },
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
 // ─── Profile pictures ─────────────────────────────────────────────────────────
 
 const profilePicturesDir = path.join(process.cwd(), "uploads", "profile-pictures");

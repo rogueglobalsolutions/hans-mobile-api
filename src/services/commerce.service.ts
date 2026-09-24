@@ -5,6 +5,13 @@ import { stripe } from "../config/stripe";
 import { syncProductToJson } from "./productJsonSync.service";
 import { UPS_DEFAULT_PACKAGE_WEIGHT_LBS } from "../config/ups";
 import * as upsService from "./ups.service";
+import {
+  getSpendableCreditBalance,
+  getUserCreditSummary,
+  releaseCreditReservation,
+  reserveCredits,
+  restoreOrderCredits,
+} from "./credit.service";
 import type Stripe from "stripe";
 import {
   AccountStatus,
@@ -890,19 +897,7 @@ async function restoreCancelledOrderStock(tx: any, order: { paidAt: Date | null;
 }
 
 async function releaseReservedOrderCredits(tx: any, orderId: string) {
-  const reservation = await tx.creditReservation.findUnique({ where: { orderId } });
-  if (!reservation || reservation.status !== CreditReservationStatus.RESERVED) return false;
-
-  const released = await tx.creditReservation.updateMany({
-    where: { id: reservation.id, status: CreditReservationStatus.RESERVED },
-    data: { status: CreditReservationStatus.RELEASED, releasedAt: new Date() },
-  });
-  if (released.count === 0) return false;
-  await tx.user.update({
-    where: { id: reservation.userId },
-    data: { creditBalance: { increment: reservation.amount } },
-  });
-  return true;
+  return releaseCreditReservation(tx, orderId);
 }
 
 export async function getOrders(filters: OrderFilters = {}) {
@@ -1171,9 +1166,16 @@ export async function refundOrder(orderId: string, adminId: string, input: any =
   const amountCents = Math.min(remainingCents, requestedCents ?? remainingCents);
   if (amountCents <= 0) throw new Error("Refund amount must be greater than zero");
 
+  const fullRefund = amountCents >= remainingCents;
   const remainingCreditCents = Math.max(0, order.creditAppliedCents - order.creditRefundedCents);
-  const creditRefundCents = Math.min(remainingCreditCents, Math.floor(amountCents / 100) * 100);
-  const stripeRefundCents = amountCents - creditRefundCents;
+  const creditRefundCents = fullRefund
+    ? remainingCreditCents
+    : Math.min(remainingCreditCents, Math.floor(amountCents / 100) * 100);
+  const cardRemainingCents = Math.max(0,
+    (order.cardAmountCents ?? order.totalAmountCents - order.creditAppliedCents) -
+    (previousRefundedCents - order.creditRefundedCents),
+  );
+  const stripeRefundCents = fullRefund ? cardRemainingCents : amountCents - creditRefundCents;
   if (stripeRefundCents > 0 && !order.stripePaymentIntentId) {
     throw new Error("No card payment found for this order");
   }
@@ -1184,40 +1186,41 @@ export async function refundOrder(orderId: string, adminId: string, input: any =
       )
     : null;
 
-  const nextPaymentStatus =
-    amountCents >= remainingCents ? CommercePaymentStatus.REFUNDED : CommercePaymentStatus.PARTIALLY_REFUNDED;
+  const nextPaymentStatus = fullRefund
+    ? CommercePaymentStatus.REFUNDED : CommercePaymentStatus.PARTIALLY_REFUNDED;
 
   await prisma.$transaction(async (tx) => {
+    let restoredCreditCents = 0;
+    if (creditRefundCents > 0 && order.userId) {
+      const restoredAmount = await restoreOrderCredits(tx, order.id, creditRefundCents / 100);
+      restoredCreditCents = Math.round(restoredAmount * 100);
+      if (restoredAmount > 0) {
+        await tx.creditTransaction.create({
+          data: {
+            userId: order.userId,
+            type: CreditTransactionType.EARNED,
+            amount: restoredAmount,
+            description: `Credit restored from refund for order ${order.orderNumber}`,
+            referenceId: order.id,
+          },
+        });
+      }
+    }
     await tx.orderRefund.create({
       data: {
         orderId,
-        amountCents,
+        amountCents: stripeRefundCents + restoredCreditCents,
         reason: input.reason || null,
         status: OrderRefundStatus.SUCCEEDED,
         stripeRefundId: stripeRefund?.id ?? null,
         requestedById: adminId,
       },
     });
-    if (creditRefundCents > 0 && order.userId) {
-      await tx.user.update({
-        where: { id: order.userId },
-        data: { creditBalance: { increment: creditRefundCents / 100 } },
-      });
-      await tx.creditTransaction.create({
-        data: {
-          userId: order.userId,
-          type: CreditTransactionType.EARNED,
-          amount: creditRefundCents / 100,
-          description: `Credit restored from refund for order ${order.orderNumber}`,
-          referenceId: order.id,
-        },
-      });
-    }
     await tx.order.update({
       where: { id: orderId },
       data: {
         paymentStatus: nextPaymentStatus,
-        creditRefundedCents: { increment: creditRefundCents },
+        creditRefundedCents: { increment: restoredCreditCents },
         refundedAt: nextPaymentStatus === CommercePaymentStatus.REFUNDED ? new Date() : order.refundedAt,
       },
     });
@@ -2043,6 +2046,7 @@ export async function voidShippingLabel(labelId: string, adminId: string) {
 }
 
 async function prepareProductOrder(userId: string, input: CreateOrderIntentInput) {
+  const spendableCreditBalance = await getSpendableCreditBalance(userId);
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new Error("User not found");
 
@@ -2122,7 +2126,7 @@ async function prepareProductOrder(userId: string, input: CreateOrderIntentInput
   const shippingFeeCents = Math.round(rate.amountUsd * 100);
   const totalAmountCents = subtotalCents + shippingFeeCents;
   let creditAppliedCents = input.applyCredits
-    ? Math.min(user.creditBalance * 100, creditEligibleSubtotalCents)
+    ? Math.min(spendableCreditBalance * 100, creditEligibleSubtotalCents)
     : 0;
   if (totalAmountCents - creditAppliedCents > 0 && totalAmountCents - creditAppliedCents < 50) {
     creditAppliedCents = Math.max(0, totalAmountCents - 50);
@@ -2132,6 +2136,7 @@ async function prepareProductOrder(userId: string, input: CreateOrderIntentInput
 
   return {
     user,
+    creditBalance: spendableCreditBalance,
     orderItems,
     subtotalCents,
     shippingFeeCents,
@@ -2152,13 +2157,17 @@ async function prepareProductOrder(userId: string, input: CreateOrderIntentInput
 }
 
 export async function getProductCheckoutProfile(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const [creditSummary, user] = await Promise.all([
+    getUserCreditSummary(userId),
+    prisma.user.findUnique({ where: { id: userId } }),
+  ]);
   if (!user) throw new Error("User not found");
 
   return {
     customerName: user.fullName,
     customerPhone: user.phoneNumber,
-    creditBalance: user.creditBalance,
+    creditBalance: creditSummary.currentBalance,
+    nextCreditExpirationAt: creditSummary.nextExpirationAt,
     shippingAddress: {
       address1: user.practiceAddressLine1 ?? user.address ?? "",
       address2: user.practiceAddressLine2 ?? "",
@@ -2178,7 +2187,7 @@ export async function quoteProductOrder(userId: string, input: CreateOrderIntent
     shippingFeeUsd: toDollars(prepared.shippingFeeCents),
     totalUsd: toDollars(prepared.totalAmountCents),
     amountDueUsd: toDollars(prepared.cardAmountCents),
-    creditBalanceUsd: prepared.user.creditBalance,
+    creditBalanceUsd: prepared.creditBalance,
     creditEligibleSubtotalUsd: toDollars(prepared.creditEligibleSubtotalCents),
     creditAppliedUsd: toDollars(prepared.creditAppliedCents),
     shippingMethod: prepared.shippingMethod,
@@ -2226,13 +2235,6 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
     const orderNumber = await getNextOrderNumber();
     try {
       order = await prisma.$transaction(async (tx) => {
-        if (creditAppliedCents > 0) {
-          const reserved = await tx.user.updateMany({
-            where: { id: userId, creditBalance: { gte: creditAppliedCents / 100 }, deletedAt: null },
-            data: { creditBalance: { decrement: creditAppliedCents / 100 } },
-          });
-          if (reserved.count === 0) throw new Error("Credit balance changed. Please review the updated total.");
-        }
         const created = await tx.order.create({
           data: {
             orderNumber, userId, customerName: user.fullName, customerEmail: user.email,
@@ -2244,9 +2246,10 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
           include: { items: true },
         });
         if (creditAppliedCents > 0) {
-          await tx.creditReservation.create({
+          const reservation = await tx.creditReservation.create({
             data: { userId, orderId: created.id, amount: creditAppliedCents / 100 },
           });
+          await reserveCredits(tx, userId, reservation.id, creditAppliedCents / 100);
         }
         return created;
       });
@@ -2289,6 +2292,87 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
   }
 }
 
+async function refundUnfulfillableProductOrder(
+  order: { id: string; userId: string | null; cardAmountCents: number | null; totalAmountCents: number },
+  paymentIntent: Stripe.PaymentIntent,
+  reason: string,
+) {
+  const claimed = await prisma.order.updateMany({
+    where: {
+      id: order.id,
+      paymentStatus: { in: [CommercePaymentStatus.PENDING, CommercePaymentStatus.FAILED] },
+    },
+    data: {
+      status: CommerceOrderStatus.CANCELLED,
+      paymentStatus: CommercePaymentStatus.FAILED,
+      cancelledAt: new Date(),
+      cancellationReason: reason,
+    },
+  });
+  if (claimed.count === 0) {
+    const current = await prisma.order.findUnique({ where: { id: order.id }, include: { items: true } });
+    if (current?.paymentStatus === CommercePaymentStatus.PAID) {
+      return { message: "Already confirmed", alreadyConfirmed: true, order: formatOrderSummary(current) };
+    }
+    if (current?.paymentStatus === CommercePaymentStatus.REFUNDED) {
+      return {
+        message: "The order could not be fulfilled. The card payment was refunded.",
+        refunded: true,
+        order: formatOrderSummary(current),
+      };
+    }
+    throw new Error("Order payment could not be finalized");
+  }
+
+  const refund = await stripe.refunds.create(
+    { payment_intent: paymentIntent.id },
+    { idempotencyKey: `unfulfillable-product-order-${order.id}` },
+  );
+
+  await prisma.$transaction(async (tx) => {
+    const now = new Date();
+    const refunded = await tx.order.updateMany({
+      where: {
+        id: order.id,
+        status: CommerceOrderStatus.CANCELLED,
+        paymentStatus: CommercePaymentStatus.FAILED,
+      },
+      data: {
+        paymentStatus: CommercePaymentStatus.REFUNDED,
+        refundedAt: now,
+      },
+    });
+    if (refunded.count === 0) return;
+
+    await releaseReservedOrderCredits(tx, order.id);
+    await tx.orderRefund.create({
+      data: {
+        orderId: order.id,
+        amountCents: order.cardAmountCents ?? order.totalAmountCents,
+        reason,
+        status: OrderRefundStatus.SUCCEEDED,
+        stripeRefundId: refund.id,
+      },
+    });
+    await tx.orderStatusHistory.create({
+      data: {
+        orderId: order.id,
+        updatedById: order.userId,
+        action: "payment_refunded_unfulfillable",
+        note: reason,
+        status: CommerceOrderStatus.CANCELLED,
+        paymentStatus: CommercePaymentStatus.REFUNDED,
+      },
+    });
+  });
+
+  return {
+    message: "The order could not be fulfilled. The card payment was refunded.",
+    refunded: true,
+    order: await getOrderById(order.id),
+  };
+}
+
 async function finalizeProductOrderPayment(paymentIntent: Stripe.PaymentIntent, userId?: string) {
   const order = await prisma.order.findFirst({
     where: { ...(userId ? { userId } : {}), stripePaymentIntentId: paymentIntent.id },
@@ -2298,6 +2382,13 @@ async function finalizeProductOrderPayment(paymentIntent: Stripe.PaymentIntent, 
   if (order.paymentStatus === CommercePaymentStatus.PAID) {
     return { message: "Already confirmed", alreadyConfirmed: true, order: formatOrderSummary(order) };
   }
+  if (order.paymentStatus === CommercePaymentStatus.REFUNDED) {
+    return {
+      message: "The order could not be fulfilled. The card payment was refunded.",
+      refunded: true,
+      order: formatOrderSummary(order),
+    };
+  }
   if (paymentIntent.status !== "succeeded") throw new Error("Payment has not succeeded");
   if (
     paymentIntent.currency.toLowerCase() !== order.currency.toLowerCase() ||
@@ -2306,10 +2397,12 @@ async function finalizeProductOrderPayment(paymentIntent: Stripe.PaymentIntent, 
     throw new Error("Payment amount does not match order");
   }
   if (order.status === CommerceOrderStatus.CANCELLED) {
-    throw new Error("Cancelled order cannot be paid");
+    return refundUnfulfillableProductOrder(order, paymentIntent, "Order was cancelled before payment completed");
   }
 
-  const finalized = await prisma.$transaction(async (tx) => {
+  let finalized: boolean;
+  try {
+    finalized = await prisma.$transaction(async (tx) => {
     const claim = await tx.order.updateMany({
       where: {
         id: order.id,
@@ -2384,12 +2477,28 @@ async function finalizeProductOrderPayment(paymentIntent: Stripe.PaymentIntent, 
       },
     });
     return true;
-  });
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "Product is out of stock") {
+      return refundUnfulfillableProductOrder(order, paymentIntent, "Product went out of stock before payment completed");
+    }
+    throw error;
+  }
 
   if (!finalized) {
     const current = await prisma.order.findUnique({ where: { id: order.id }, include: { items: true } });
     if (current?.paymentStatus === CommercePaymentStatus.PAID) {
       return { message: "Already confirmed", alreadyConfirmed: true, order: formatOrderSummary(current) };
+    }
+    if (current?.paymentStatus === CommercePaymentStatus.REFUNDED) {
+      return {
+        message: "The order could not be fulfilled. The card payment was refunded.",
+        refunded: true,
+        order: formatOrderSummary(current),
+      };
+    }
+    if (current?.status === CommerceOrderStatus.CANCELLED) {
+      return refundUnfulfillableProductOrder(order, paymentIntent, "Order was cancelled before payment completed");
     }
     throw new Error("Order payment could not be finalized");
   }

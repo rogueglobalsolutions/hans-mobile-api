@@ -26,6 +26,7 @@ import supportRoutes from "./routes/support.routes";
 import adsRoutes from "./routes/ads.routes";
 import discountRoutes from "./routes/discount.routes";
 import webAuthRoutes from "./routes/web/webAuth.routes";
+import { enforceTrainingPaymentDeadlines } from "./services/trainingLifecycle.service";
 
 const app = express();
 const server = http.createServer(app);
@@ -88,4 +89,15 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 });
 
 const PORT = process.env.PORT || 5656;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  enforceTrainingPaymentDeadlines().catch((error) => {
+    console.error("Failed to enforce training payment deadlines:", error);
+  });
+  const deadlineTimer = setInterval(() => {
+    enforceTrainingPaymentDeadlines().catch((error) => {
+      console.error("Failed to enforce training payment deadlines:", error);
+    });
+  }, 60 * 60 * 1000);
+  deadlineTimer.unref();
+});

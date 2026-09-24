@@ -6,6 +6,7 @@ import * as baController from "../controllers/ba.controller";
 import * as salesRepController from "../controllers/salesRep.controller";
 import * as trainingDocController from "../controllers/trainingDoc.controller";
 import * as commerceController from "../controllers/commerce.controller";
+import * as trainingLifecycleController from "../controllers/trainingLifecycle.controller";
 import { authenticateToken, requireRole } from "../middleware/auth";
 import { Role } from "../generated/prisma/enums";
 import { uploadTrainingBg, uploadTrainingDocs, uploadProductImage } from "../middleware/upload";
@@ -47,6 +48,8 @@ router.delete("/trainings/:id", trainingController.deleteTraining);
 router.post("/trainings/:id/cancel", trainingController.cancelTraining);
 router.get("/trainings/:id/enrollees", trainingController.getTrainingEnrollees);
 router.post("/trainings/:id/enrollments/:enrollmentId/complete", trainingController.completeEnrollment);
+router.post("/trainings/:id/enrollments/:enrollmentId/no-show", trainingLifecycleController.markNoShow);
+router.post("/training-requests/:requestId/review", trainingLifecycleController.reviewRequest);
 
 // Training document management
 router.get("/trainings/:id/folders", trainingDocController.getFolders);

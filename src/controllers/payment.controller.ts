@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { stripe } from "../config/stripe";
 import * as trainingService from "../services/training.service";
 import * as commerceService from "../services/commerce.service";
+import * as trainingLifecycleService from "../services/trainingLifecycle.service";
 import { sanitizeError } from "../utils/errors";
 import { EnrollmentType } from "../generated/prisma/enums";
 import type Stripe from "stripe";
@@ -10,6 +11,7 @@ function paymentKind(paymentIntent: Stripe.PaymentIntent) {
   if (paymentIntent.metadata?.orderId || paymentIntent.metadata?.kind === "product_order") {
     return "product_order";
   }
+  if (paymentIntent.metadata?.kind === "training_no_show_fee") return "training_no_show_fee";
   if (paymentIntent.metadata?.trainingId) return "training_enrollment";
   return "unknown";
 }
@@ -60,6 +62,7 @@ export async function createPaymentIntent(req: Request, res: Response) {
       "Training is full",
       "You must complete",
       "Already enrolled",
+      "This registration was cancelled",
       "Observer enrollment is only available",
     ];
     const status = clientErrors.some((e) => msg.includes(e)) ? 400 : 500;
@@ -122,6 +125,12 @@ export async function handleWebhook(req: Request, res: Response) {
         await commerceService.confirmProductOrderPaymentFromWebhook(paymentIntent);
       } else if (kind === "training_enrollment") {
         await trainingService.confirmEnrollmentPayment(paymentIntent.id);
+      } else if (kind === "training_no_show_fee") {
+        await trainingLifecycleService.confirmNoShowFee(
+          paymentIntent.metadata.userId,
+          paymentIntent.metadata.enrollmentId,
+          paymentIntent.id,
+        );
       } else {
         console.warn(`[stripe.webhook] Ignoring unrecognized PaymentIntent ${paymentIntent.id}`);
       }
@@ -136,6 +145,8 @@ export async function handleWebhook(req: Request, res: Response) {
         );
       } else if (kind === "training_enrollment") {
         await trainingService.failEnrollment(paymentIntent.id);
+      } else if (kind === "training_no_show_fee") {
+        await trainingLifecycleService.failNoShowFee(paymentIntent.id);
       }
     }
     res.json({ received: true });
