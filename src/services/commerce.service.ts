@@ -963,12 +963,45 @@ export async function updateOrderStatus(orderId: string, adminId: string, input:
   const current = await prisma.order.findUnique({ where: { id: orderId } });
   if (!current) throw new Error("Order not found");
   const status = input.status ? normalizeOrderStatus(input.status) : undefined;
+  if (input.status && !status) throw new Error("Invalid order status");
+  if (!status) throw new Error("Order status is required");
+  if (input.verificationStatus) throw new Error("Use the verification route to verify an order");
+  if (status !== CommerceOrderStatus.SHIPPED && status !== CommerceOrderStatus.DELIVERED &&
+      (input.fulfillmentStatus || input.deliveryStatus)) {
+    throw new Error("Fulfillment and delivery statuses are managed by the order status");
+  }
+  if (status === CommerceOrderStatus.SHIPPED &&
+      ((input.fulfillmentStatus && input.fulfillmentStatus !== FulfillmentStatus.FULFILLED) ||
+       (input.deliveryStatus && input.deliveryStatus !== DeliveryStatus.IN_TRANSIT))) {
+    throw new Error("Invalid fulfillment or delivery status for a shipped order");
+  }
+  if (status === CommerceOrderStatus.DELIVERED &&
+      ((input.fulfillmentStatus && input.fulfillmentStatus !== FulfillmentStatus.FULFILLED) ||
+       (input.deliveryStatus && input.deliveryStatus !== DeliveryStatus.DELIVERED))) {
+    throw new Error("Invalid fulfillment or delivery status for a delivered order");
+  }
+  if (status === CommerceOrderStatus.CANCELLED) {
+    throw new Error("Use the cancellation route to cancel and refund an order");
+  }
 
-  if (current.status === CommerceOrderStatus.CANCELLED && status !== CommerceOrderStatus.CANCELLED) {
+  if (current.status === CommerceOrderStatus.CANCELLED && status) {
     throw new Error("Cancelled order status cannot be changed");
+  }
+  if (current.status === CommerceOrderStatus.DELIVERED && status && status !== CommerceOrderStatus.DELIVERED) {
+    throw new Error("Delivered order status cannot be changed");
+  }
+  if (status && current.paymentStatus !== CommercePaymentStatus.PAID) {
+    throw new Error("Only paid orders can advance through fulfillment");
+  }
+  if (status === CommerceOrderStatus.PENDING && current.status !== CommerceOrderStatus.PENDING) {
+    throw new Error("Order cannot return to pending from its current status");
   }
   if (status === CommerceOrderStatus.PROCESSING && current.paymentStatus !== CommercePaymentStatus.PAID) {
     throw new Error("Order must be paid before processing");
+  }
+  if (status === CommerceOrderStatus.PROCESSING &&
+      current.status !== CommerceOrderStatus.PENDING && current.status !== CommerceOrderStatus.PROCESSING) {
+    throw new Error("Order cannot return to processing from its current status");
   }
   if (status === CommerceOrderStatus.SHIPPED) {
     if (current.paymentStatus !== CommercePaymentStatus.PAID) {
@@ -990,11 +1023,17 @@ export async function updateOrderStatus(orderId: string, adminId: string, input:
     throw new Error("Only a shipped order can be marked delivered");
   }
   const data: any = {
-    ...(status ? { status } : {}),
-    ...(input.fulfillmentStatus ? { fulfillmentStatus: input.fulfillmentStatus as FulfillmentStatus } : {}),
-    ...(input.deliveryStatus ? { deliveryStatus: input.deliveryStatus as DeliveryStatus } : {}),
-    ...(input.verificationStatus ? { verificationStatus: input.verificationStatus as OrderVerificationStatus } : {}),
+    status,
   };
+
+  if (status === CommerceOrderStatus.SHIPPED) {
+    data.fulfillmentStatus = FulfillmentStatus.FULFILLED;
+    data.deliveryStatus = DeliveryStatus.IN_TRANSIT;
+  }
+  if (status === CommerceOrderStatus.DELIVERED) {
+    data.fulfillmentStatus = FulfillmentStatus.FULFILLED;
+    data.deliveryStatus = DeliveryStatus.DELIVERED;
+  }
 
   if (data.status === CommerceOrderStatus.SHIPPED) data.shippedAt = new Date();
   if (data.status === CommerceOrderStatus.DELIVERED) data.deliveredAt = new Date();
@@ -1035,6 +1074,12 @@ export async function updateOrderTracking(orderId: string, adminId: string, inpu
   if (current.status === CommerceOrderStatus.CANCELLED || current.status === CommerceOrderStatus.DELIVERED) {
     throw new Error("Tracking cannot be changed for this order");
   }
+  if (input.deliveryStatus && input.deliveryStatus !== DeliveryStatus.IN_TRANSIT) {
+    throw new Error("Delivery status cannot be set through tracking");
+  }
+  if (!String(input.trackingNumber || "").trim()) {
+    throw new Error("Tracking number is required");
+  }
 
   const order = await prisma.$transaction(async (tx) => {
     const updated = await tx.order.update({
@@ -1044,7 +1089,7 @@ export async function updateOrderTracking(orderId: string, adminId: string, inpu
         courierName: input.courierName || input.carrier || null,
         trackingUrl: input.trackingUrl || null,
         ...(input.shippingMethod ? { shippingMethod: input.shippingMethod as ShippingMethod } : {}),
-        deliveryStatus: input.deliveryStatus ? (input.deliveryStatus as DeliveryStatus) : DeliveryStatus.IN_TRANSIT,
+        deliveryStatus: DeliveryStatus.IN_TRANSIT,
       },
       include: { items: true },
     });
@@ -2070,11 +2115,15 @@ async function prepareProductOrder(userId: string, input: CreateOrderIntentInput
       include: { variants: true },
     });
     if (!product) throw new Error("Product not found");
-    if (product.stockQty < quantity) throw new Error("Product is out of stock");
+    if (product.stockQty < quantity) throw new Error(`Only ${product.stockQty} available for ${product.name}`);
 
     const variant = requested.variantId
       ? product.variants.find((item) => item.id === requested.variantId)
       : product.variants[0] ?? null;
+    if (requested.variantId && !variant) throw new Error("Product variant not found");
+    if (variant?.stockQty != null && variant.stockQty < quantity) {
+      throw new Error(`Only ${variant.stockQty} available for ${product.name} (${variant.label || "selected variant"})`);
+    }
     const stripePriceId = variant?.stripePriceId || product.stripeDefaultPriceId;
     if (!stripePriceId) throw new Error("Product checkout is not configured");
 

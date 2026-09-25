@@ -39,6 +39,7 @@ export async function uploadDocument(req: Request, res: Response) {
       return;
     }
     const doc = await trainingDocService.addDocument(
+      req.params.id as string,
       folderId,
       file.originalname,
       `uploads/training-docs/${file.filename}`,
@@ -47,6 +48,7 @@ export async function uploadDocument(req: Request, res: Response) {
     );
     res.status(201).json({ success: true, data: doc });
   } catch (err: any) {
+    if (req.file) fs.rmSync(req.file.path, { force: true });
     const status = err.message?.includes("not found") ? 404 : 500;
     res.status(status).json({ success: false, message: sanitizeError(err, "uploadDocument") });
   }
@@ -54,16 +56,17 @@ export async function uploadDocument(req: Request, res: Response) {
 
 export async function deleteFolder(req: Request, res: Response) {
   try {
-    await trainingDocService.deleteFolder(req.params.folderId as string);
+    await trainingDocService.deleteFolder(req.params.id as string, req.params.folderId as string);
     res.json({ success: true, message: "Folder deleted" });
-  } catch (err) {
-    res.status(500).json({ success: false, message: sanitizeError(err, "deleteFolder") });
+  } catch (err: any) {
+    const status = err.message?.includes("not found") ? 404 : 500;
+    res.status(status).json({ success: false, message: sanitizeError(err, "deleteFolder") });
   }
 }
 
 export async function deleteDocument(req: Request, res: Response) {
   try {
-    await trainingDocService.deleteDocument(req.params.docId as string);
+    await trainingDocService.deleteDocument(req.params.id as string, req.params.docId as string);
     res.json({ success: true, message: "Document deleted" });
   } catch (err: any) {
     const status = err.message?.includes("not found") ? 404 : 500;
@@ -81,7 +84,8 @@ export async function downloadFile(req: Request, res: Response) {
     // Sanitize — only allow paths under the uploads directory
     const resolved = path.resolve(filePath);
     const uploadsDir = path.resolve("uploads");
-    if (!resolved.startsWith(uploadsDir)) {
+    const relative = path.relative(uploadsDir, resolved);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
       res.status(403).json({ success: false, message: "Access denied" });
       return;
     }

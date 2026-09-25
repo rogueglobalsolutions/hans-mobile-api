@@ -15,6 +15,18 @@ import { redeemDiscountCode } from "./discount.service";
 import { getSubmittedApplication } from "./trainingApplication.service";
 import { issueTrainingCredits } from "./credit.service";
 import { countHeldTraineeSeats, countOccupiedTraineeSeats } from "./trainingSeat.service";
+import fs from "fs";
+import path from "path";
+
+function removeTrainingImage(filePath: string | null | undefined) {
+  if (!filePath) return;
+  const resolved = path.resolve(filePath);
+  const allowed = [path.resolve("uploads/trainings-bg-img"), path.resolve("uploads/trainings-speaker-img")];
+  if (!allowed.includes(path.dirname(resolved))) return;
+  try { fs.rmSync(resolved, { force: true }); } catch (error) {
+    console.error("Failed to remove training image:", error);
+  }
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -135,7 +147,7 @@ export async function updateTraining(trainingId: string, input: UpdateTrainingIn
     creditScore = pricing.creditScore;
   }
 
-  return prisma.training.update({
+  const updated = await prisma.training.update({
     where: { id: trainingId },
     data: {
       ...(input.type                !== undefined && { type: input.type }),
@@ -158,12 +170,19 @@ export async function updateTraining(trainingId: string, input: UpdateTrainingIn
       ...(input.subOptions          !== undefined && { subOptions: input.subOptions ? JSON.parse(JSON.stringify(input.subOptions)) : undefined }),
     },
   });
+  if (input.speakerImagePath && input.speakerImagePath !== training.speakerImagePath) {
+    removeTrainingImage(training.speakerImagePath);
+  }
+  if (input.backgroundImagePath && input.backgroundImagePath !== training.backgroundImagePath) {
+    removeTrainingImage(training.backgroundImagePath);
+  }
+  return updated;
 }
 
 export async function deleteTraining(trainingId: string) {
   const training = await prisma.training.findUnique({
     where: { id: trainingId },
-    select: { id: true },
+    select: { id: true, speakerImagePath: true, backgroundImagePath: true },
   });
   if (!training) throw new Error("Training not found");
 
@@ -176,6 +195,8 @@ export async function deleteTraining(trainingId: string) {
   }
 
   await prisma.training.delete({ where: { id: trainingId } });
+  removeTrainingImage(training.speakerImagePath);
+  removeTrainingImage(training.backgroundImagePath);
   return { message: "Training deleted successfully" };
 }
 
@@ -420,14 +441,15 @@ export async function initiateEnrollment(
   const enrolleeListAmountCents = enrolleeAmountCents;
 
   if (discountCode) {
-    const discount = await prisma.discountCode.findUnique({ where: { code: discountCode.toUpperCase() } });
-    if (discount?.isActive && (!discount.expiresAt || new Date() < discount.expiresAt) &&
-        (discount.maxUses === null || discount.usedCount < discount.maxUses) &&
-        (discount.applicableTo === "TRAINING" || discount.applicableTo === "BOTH")) {
-      enrolleeAmountCents = discount.type === "FIXED"
-        ? Math.max(0, enrolleeAmountCents - discount.value * 100)
-        : Math.max(0, Math.round(enrolleeAmountCents * (1 - discount.value / 100)));
+    const discount = await prisma.discountCode.findUnique({ where: { code: discountCode.trim().toUpperCase() } });
+    if (!discount?.isActive || (discount.expiresAt && new Date() >= discount.expiresAt) ||
+        (discount.maxUses !== null && discount.usedCount >= discount.maxUses) ||
+        (discount.applicableTo !== "TRAINING" && discount.applicableTo !== "BOTH")) {
+      throw new Error("Discount code is invalid or no longer available");
     }
+    enrolleeAmountCents = discount.type === "FIXED"
+      ? Math.max(0, enrolleeAmountCents - discount.value * 100)
+      : Math.max(0, Math.round(enrolleeAmountCents * (1 - discount.value / 100)));
   }
 
   const observerPrice = await stripe.prices.retrieve(OBSERVER_STRIPE_PRICE_ID);

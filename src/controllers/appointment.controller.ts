@@ -14,8 +14,8 @@ export async function createAppointment(req: Request, res: Response) {
     if (!date || typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
       errors.push("Valid date is required (YYYY-MM-DD)");
     }
-    if (!time || typeof time !== "string" || !time.trim()) {
-      errors.push("Time is required");
+    if (!time || typeof time !== "string" || !/^(0?[1-9]|1[0-2]):[0-5]\d (AM|PM)$/.test(time.trim())) {
+      errors.push("Valid time is required (for example, 9:30 AM)");
     }
     if (!salesRepId || typeof salesRepId !== "string" || !salesRepId.trim()) {
       errors.push("A sales representative must be selected");

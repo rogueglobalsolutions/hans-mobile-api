@@ -23,6 +23,15 @@ export async function createAppointment({
   time,
   notes,
 }: CreateAppointmentInput) {
+  const [year, month, day] = date.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) {
+    throw new Error("Appointment date must be a valid calendar date");
+  }
+  if (!/^(0?[1-9]|1[0-2]):[0-5]\d (AM|PM)$/.test(time)) {
+    throw new Error("Appointment time must be valid");
+  }
   // Validate date is not in the past
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -119,6 +128,7 @@ export async function getAppointmentRequests() {
     time: a.time,
     notes: a.notes,
     status: a.status,
+    rejectionReason: a.rejectionReason,
     salesRepName: a.salesRep?.fullName ?? null,
     createdAt: a.createdAt,
   }));
@@ -221,6 +231,7 @@ export async function getSalesRepAppointments(salesRepId: string) {
     time: a.time,
     notes: a.notes,
     status: a.status,
+    rejectionReason: a.rejectionReason,
     createdAt: a.createdAt,
   }));
 }
@@ -312,6 +323,11 @@ export async function completeAppointmentBySalesRep(
   }
   if (appointment.status !== "APPROVED") {
     throw new Error("Only approved appointments can be marked as completed");
+  }
+  const today = new Date();
+  const localDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  if (appointment.date > localDate) {
+    throw new Error("Future appointments cannot be marked as completed");
   }
 
   await prisma.appointment.update({

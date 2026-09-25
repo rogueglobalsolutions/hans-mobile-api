@@ -19,6 +19,7 @@ import productRoutes from "./routes/product.routes";
 import orderRoutes from "./routes/order.routes";
 import * as salesRepController from "./controllers/salesRep.controller";
 import { authenticateToken, requireRole } from "./middleware/auth";
+import { secureUploads } from "./middleware/secureUploads";
 import { requestLogger } from "./middleware/requestLogger";
 import { Role } from "./generated/prisma/enums";
 import { initSocket } from "./socket";
@@ -46,9 +47,7 @@ app.post(
 
 app.use(express.json());
 
-// Serve uploaded files (ID documents, training background images, etc.)
-// In production, replace with signed URLs or a CDN-backed route with auth checks.
-app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+app.use("/uploads", secureUploads, express.static(path.join(process.cwd(), "uploads")));
 
 // Routes
 app.get("/api/health", (req, res) => {

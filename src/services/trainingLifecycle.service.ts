@@ -395,6 +395,10 @@ export async function reviewTrainingRequest(
   const trainingDate = request.enrollment.training.scheduledAt;
   if (!trainingDate) throw new Error("Training date is not configured");
   const early = countBusinessDays(request.createdAt, trainingDate) >= 10;
+  if (!early && input.waivePenalty &&
+      (!request.emergencyDetails?.trim() || !request.supportingDocumentPath)) {
+    throw new Error("Emergency details and a supporting document are required to waive a late-cancellation penalty");
+  }
   const fullRefund = early || Boolean(input.waivePenalty);
   const paidAmount = request.enrollment.paidAmount ?? 0;
   const policyPenalty = Math.round(

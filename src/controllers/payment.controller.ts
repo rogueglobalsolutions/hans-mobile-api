@@ -64,8 +64,12 @@ export async function createPaymentIntent(req: Request, res: Response) {
       "Already enrolled",
       "This registration was cancelled",
       "Observer enrollment is only available",
+      "Submit the training application before payment",
+      "This training is full",
+      "Discount code is invalid or no longer available",
     ];
-    const status = clientErrors.some((e) => msg.includes(e)) ? 400 : 500;
+    const rawMessage = err instanceof Error ? err.message : "";
+    const status = clientErrors.some((e) => rawMessage.includes(e)) ? 400 : 500;
     res.status(status).json({ success: false, message: msg });
   }
 }

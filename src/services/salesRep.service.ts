@@ -1,5 +1,5 @@
 import prisma from "../config/prisma";
-import { Role, PaymentStatus } from "../generated/prisma/enums";
+import { Role, PaymentStatus, EnrollmentStatus, EnrollmentAttendanceStatus } from "../generated/prisma/enums";
 import bcrypt from "bcryptjs";
 
 /**
@@ -33,7 +33,11 @@ export async function getEnrolleesByTraining() {
       level:     true,
       scheduledAt: true,
       enrollments: {
-        where: { paymentStatus: PaymentStatus.COMPLETED },
+        where: {
+          paymentStatus: PaymentStatus.COMPLETED,
+          status: EnrollmentStatus.ACTIVE,
+          attendanceStatus: { not: EnrollmentAttendanceStatus.NO_SHOW },
+        },
         include: {
           user:     { select: { id: true, fullName: true, email: true, phoneNumber: true, profilePicturePath: true } },
           salesRep: { select: { id: true, fullName: true } },

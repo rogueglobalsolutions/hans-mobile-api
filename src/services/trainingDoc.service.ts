@@ -40,6 +40,7 @@ export async function createFolder(trainingId: string, name: string, parentId?: 
  * Add a document to a folder.
  */
 export async function addDocument(
+  trainingId: string,
   folderId: string,
   fileName: string,
   filePath: string,
@@ -47,7 +48,7 @@ export async function addDocument(
   mimeType: string,
 ) {
   const folder = await prisma.trainingFolder.findUnique({ where: { id: folderId } });
-  if (!folder) throw new Error("Folder not found");
+  if (!folder || folder.trainingId !== trainingId) throw new Error("Folder not found");
 
   return prisma.trainingDocument.create({
     data: { folderId, fileName, filePath, fileSize, mimeType },
@@ -57,11 +58,18 @@ export async function addDocument(
 /**
  * Delete a folder and all its nested contents (files deleted from disk too).
  */
-export async function deleteFolder(folderId: string) {
-  // Collect all file paths before cascade delete
-  const allDocs = await prisma.trainingDocument.findMany({
-    where: { folder: { OR: [{ id: folderId }, { parentId: folderId }] } },
-  });
+export async function deleteFolder(trainingId: string, folderId: string) {
+  const root = await prisma.trainingFolder.findUnique({ where: { id: folderId } });
+  if (!root || root.trainingId !== trainingId) throw new Error("Folder not found");
+  const folderIds = [folderId];
+  for (let cursor = 0; cursor < folderIds.length; cursor++) {
+    const children = await prisma.trainingFolder.findMany({
+      where: { parentId: folderIds[cursor], trainingId },
+      select: { id: true },
+    });
+    folderIds.push(...children.map(child => child.id));
+  }
+  const allDocs = await prisma.trainingDocument.findMany({ where: { folderId: { in: folderIds } } });
   await prisma.trainingFolder.delete({ where: { id: folderId } });
   for (const doc of allDocs) {
     try { fs.unlinkSync(path.resolve(doc.filePath)); } catch {}
@@ -71,9 +79,9 @@ export async function deleteFolder(folderId: string) {
 /**
  * Delete a single document (removes file from disk too).
  */
-export async function deleteDocument(docId: string) {
-  const doc = await prisma.trainingDocument.findUnique({ where: { id: docId } });
-  if (!doc) throw new Error("Document not found");
+export async function deleteDocument(trainingId: string, docId: string) {
+  const doc = await prisma.trainingDocument.findUnique({ where: { id: docId }, include: { folder: true } });
+  if (!doc || doc.folder.trainingId !== trainingId) throw new Error("Document not found");
   await prisma.trainingDocument.delete({ where: { id: docId } });
   try { fs.unlinkSync(path.resolve(doc.filePath)); } catch {}
 }

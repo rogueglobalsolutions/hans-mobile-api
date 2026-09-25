@@ -170,7 +170,9 @@ function deleteUploadFile(relativePath: string | null | undefined) {
 export async function deleteAccount(userId: string, currentPassword: string) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user || user.deletedAt) throw new Error("User not found");
-  if (user.role !== Role.MED) throw new Error("Account deletion is only available for MED accounts");
+  if (user.role !== Role.MED && user.role !== Role.USER) {
+    throw new Error("Account deletion is only available for MED and USER accounts");
+  }
   const validPassword = await bcrypt.compare(currentPassword, user.password);
   if (!validPassword) throw new Error("Current password is incorrect");
 

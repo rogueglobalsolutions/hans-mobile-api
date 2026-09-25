@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import fs from "fs";
 import * as trainingService from "../services/training.service";
 import {
   TRAINING_TYPE_FROM_LABEL,
@@ -13,6 +14,13 @@ import {
   LearningFormat,
 } from "../utils/trainingEnums";
 import { TrainingType, TrainingBrand, TrainingLevel } from "../generated/prisma/enums";
+
+function removeRejectedTrainingImages(req: Request) {
+  const files = req.files as Record<string, Express.Multer.File[]> | undefined;
+  for (const group of Object.values(files || {})) {
+    for (const file of group) fs.rmSync(file.path, { force: true });
+  }
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,6 +60,7 @@ function parseSubOptions(raw: any, errors: string[]): SubOption[] | undefined {
 // ─── Admin: Create Training ───────────────────────────────────────────────────
 
 export async function createTraining(req: Request, res: Response) {
+  let persisted = false;
   try {
     const {
       type: typeLabel,
@@ -185,6 +194,7 @@ export async function createTraining(req: Request, res: Response) {
       createdBy:       adminId,
       subOptions,
     });
+    persisted = true;
 
     return res.status(201).json({
       success: true,
@@ -194,12 +204,15 @@ export async function createTraining(req: Request, res: Response) {
   } catch (err: any) {
     console.error("[createTraining]", err);
     return res.status(500).json({ success: false, message: "Failed to create training" });
+  } finally {
+    if (!persisted) removeRejectedTrainingImages(req);
   }
 }
 
 // ─── Admin: Update Training ───────────────────────────────────────────────────
 
 export async function updateTraining(req: Request, res: Response) {
+  let persisted = false;
   try {
     const trainingId = req.params.id as string;
 
@@ -335,6 +348,7 @@ export async function updateTraining(req: Request, res: Response) {
       ...(backgroundImagePath  && { backgroundImagePath }),
       ...(subOptions   !== undefined && { subOptions }),
     });
+    persisted = true;
 
     return res.json({
       success: true,
@@ -350,6 +364,8 @@ export async function updateTraining(req: Request, res: Response) {
     }
     console.error("[updateTraining]", err);
     return res.status(500).json({ success: false, message: "Failed to update training" });
+  } finally {
+    if (!persisted) removeRejectedTrainingImages(req);
   }
 }
 

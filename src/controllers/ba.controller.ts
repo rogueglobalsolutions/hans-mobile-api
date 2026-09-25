@@ -2,10 +2,19 @@ import { Request, Response } from "express";
 import * as baService from "../services/ba.service";
 import { sanitizeError } from "../utils/errors";
 import { MediaSection } from "../generated/prisma/enums";
+import fs from "fs";
+
+function removeRejectedUploads(files: Request["files"]) {
+  if (!files || Array.isArray(files)) return;
+  for (const group of Object.values(files)) {
+    for (const file of group) fs.rmSync(file.path, { force: true });
+  }
+}
 
 // ─── MED: Before & After Entries ──────────────────────────────────────────────
 
 export async function createEntry(req: Request, res: Response) {
+  let created = false;
   try {
     const userId = (req as any).userId as string;
     const { title, description } = req.body;
@@ -49,15 +58,18 @@ export async function createEntry(req: Request, res: Response) {
       });
     }
 
-    if (mediaItems.length === 0) {
-      res.status(400).json({ success: false, message: "At least one photo is required" });
+    if (!beforeFiles.length || !afterFiles.length) {
+      res.status(400).json({ success: false, message: "At least one Before and one After photo are required" });
       return;
     }
 
     const entry = await baService.createEntry(userId, title.trim(), description.trim(), mediaItems);
+    created = true;
     res.status(201).json({ success: true, message: "Entry created successfully", data: entry });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "createBAEntry") });
+  } finally {
+    if (!created) removeRejectedUploads(req.files);
   }
 }
 
@@ -104,6 +116,7 @@ export async function getMyEntryCount(req: Request, res: Response) {
 // ─── MED: Contest Entries ─────────────────────────────────────────────────────
 
 export async function createContestEntry(req: Request, res: Response) {
+  let created = false;
   try {
     const userId = (req as any).userId as string;
     const { title, description } = req.body;
@@ -153,9 +166,12 @@ export async function createContestEntry(req: Request, res: Response) {
     }
 
     const entry = await baService.createContestEntry(userId, title.trim(), description.trim(), mediaItems);
+    created = true;
     res.status(201).json({ success: true, message: "Contest entry submitted successfully", data: entry });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "createContestEntry") });
+  } finally {
+    if (!created) removeRejectedUploads(req.files);
   }
 }
 

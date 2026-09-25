@@ -21,6 +21,9 @@ const SAFE_MESSAGES: Record<string, string> = {
   "Current password is incorrect": "Current password is incorrect",
   // Appointment errors
   "Appointment date must be in the future": "Appointment date must be in the future.",
+  "Appointment date must be a valid calendar date": "Choose a valid calendar date.",
+  "Appointment time must be valid": "Choose a valid appointment time.",
+  "Future appointments cannot be marked as completed": "This appointment cannot be completed before its scheduled date.",
   "This date is no longer available. Please select another date.": "This date is no longer available. Please select another date.",
   "You already have an appointment request for this date.": "You already have an appointment request for this date.",
   "Appointment not found": "Appointment not found.",
@@ -36,6 +39,10 @@ const SAFE_MESSAGES: Record<string, string> = {
   "Training not found": "Training not found.",
   "Training is not available for enrollment": "This training is not available for enrollment.",
   "Training is full": "This training is full. No more slots available.",
+  "This training is full. No more slots available.": "This training is full. No more slots available.",
+  "Submit the training application before payment": "Submit the training application before payment.",
+  "Discount code is invalid or no longer available": "This discount code is invalid or no longer available.",
+  "Emergency details and a supporting document are required to waive a late-cancellation penalty": "Emergency details and a supporting document are required for a late-cancellation waiver.",
   "Observer enrollment is only available when enrollee seats are full": "Observer enrollment is only available when enrollee seats are full.",
   "Already enrolled in this training": "You are already enrolled in this training.",
   "Registration for this training was cancelled": "This registration was cancelled. Please choose another training session.",
@@ -136,6 +143,20 @@ const SAFE_MESSAGES: Record<string, string> = {
   "Shipped or delivered orders cannot be cancelled": "Shipped or delivered orders cannot be cancelled.",
   "Void the shipping label before cancelling this order": "Void the active shipping label before cancelling this order.",
   "Order cancellation could not be approved": "This cancellation request changed. Refresh the order and try again.",
+  "Product variant not found": "The selected product variant is no longer available.",
+  "Invalid order status": "Choose a valid order status.",
+  "Use the cancellation route to cancel and refund an order": "Use the cancellation action to cancel and refund an order.",
+  "Only paid orders can advance through fulfillment": "Only paid orders can advance through fulfillment.",
+  "Delivered order status cannot be changed": "Delivered orders cannot return to an earlier status.",
+  "Order cannot return to processing from its current status": "This order cannot return to processing.",
+  "Order cannot return to pending from its current status": "This order cannot return to pending.",
+  "Order status is required": "Choose an order status.",
+  "Use the verification route to verify an order": "Use the verification action to verify an order.",
+  "Fulfillment and delivery statuses are managed by the order status": "Change the order status to update fulfillment and delivery.",
+  "Invalid fulfillment or delivery status for a shipped order": "The shipping fields do not match a shipped order.",
+  "Invalid fulfillment or delivery status for a delivered order": "The delivery fields do not match a delivered order.",
+  "Delivery status cannot be set through tracking": "Use the order status action to change delivery status.",
+  "Tracking number is required": "Enter a tracking number.",
 };
 
 const FALLBACK_MESSAGES: Record<string, string> = {
@@ -229,7 +250,8 @@ export function sanitizeError(error: unknown, operation: string): string {
     // Pass through dynamic messages that are safe to show users
     if (
       error.message.startsWith("You need at least") ||
-      error.message.startsWith("You must complete")
+      error.message.startsWith("You must complete") ||
+      /^Only \d+ available for /.test(error.message)
     ) {
       return error.message;
     }

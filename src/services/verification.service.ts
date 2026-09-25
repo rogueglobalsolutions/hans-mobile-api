@@ -1,6 +1,8 @@
 import prisma from "../config/prisma";
 import { AccountStatus, Role } from "../generated/prisma/enums";
 import { sendVerificationStatusEmail } from "./email.service";
+import fs from "fs";
+import path from "path";
 
 interface SubmitVerificationInput {
   userId: string;
@@ -36,6 +38,17 @@ export async function submitVerification(input: SubmitVerificationInput) {
       verifiedBy: null,
     },
   });
+
+  for (const previousPath of [user.idDocumentFrontPath, user.idDocumentBackPath]) {
+    if (!previousPath || previousPath === input.idDocumentFrontPath || previousPath === input.idDocumentBackPath) continue;
+    const resolved = path.resolve(previousPath);
+    const verificationDir = path.resolve("uploads/verifications");
+    if (path.dirname(resolved) === verificationDir) {
+      try { fs.rmSync(resolved, { force: true }); } catch (error) {
+        console.error("Failed to remove superseded verification image:", error);
+      }
+    }
+  }
 
   return {
     message: "Verification documents submitted successfully. Your account will be reviewed by our team.",
