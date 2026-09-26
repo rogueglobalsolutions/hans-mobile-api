@@ -1279,17 +1279,21 @@ Submit an appointment request.
 {
   "date": "2026-03-18",
   "time": "10:00 AM",
+  "timeZone": "America/New_York",
+  "salesRepId": "sales-rep-uuid",
   "notes": "Interested in discussing PDO thread training options."
 }
 ```
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `date` | string | Yes | Date in `YYYY-MM-DD` format. Must be today or in the future. |
+| `date` | string | Yes | Date in `YYYY-MM-DD` format. The date and time must be in the future in the selected time zone. |
 | `time` | string | Yes | Time string, e.g. `"10:00 AM"` |
+| `timeZone` | string | No | IANA time zone, e.g. `America/New_York`. The current mobile app requires a selection; omitted values use Pacific Time for older clients. |
+| `salesRepId` | string | Yes | Assigned Sales Rep ID. |
 | `notes` | string | No | Optional context or reason for the appointment |
 
-**Success Response** (201)
+**Success Response** (200)
 
 ```json
 {
@@ -1301,7 +1305,7 @@ Submit an appointment request.
 **Error Responses** (400)
 
 ```json
-{ "success": false, "message": "Appointment date must be in the future" }
+{ "success": false, "message": "Choose an appointment date and time in the future." }
 ```
 
 ```json
@@ -1331,6 +1335,7 @@ Get all appointments for the authenticated MED user.
       "id": "appointment-uuid",
       "date": "2026-03-18",
       "time": "10:00 AM",
+      "timeZone": "America/New_York",
       "notes": "Interested in discussing PDO thread training options.",
       "status": "APPROVED",
       "zoomLink": "https://zoom.us/j/123456789",
@@ -1345,6 +1350,7 @@ Get all appointments for the authenticated MED user.
 |---|---|---|
 | `zoomLink` | string \| null | Populated on approval from the server's `ZOOM_MEETING_LINK` env var |
 | `rejectionReason` | string \| null | Populated on rejection — same text sent via email |
+| `timeZone` | string | IANA zone used to interpret the appointment time. Legacy rows without a saved zone are displayed as Pacific Time. |
 
 ---
 

@@ -21,9 +21,11 @@ const SAFE_MESSAGES: Record<string, string> = {
   "Current password is incorrect": "Current password is incorrect",
   // Appointment errors
   "Appointment date must be in the future": "Appointment date must be in the future.",
+  "Appointment date and time must be in the future": "Choose an appointment date and time in the future.",
+  "Appointment time zone is invalid": "Choose a valid appointment time zone.",
   "Appointment date must be a valid calendar date": "Choose a valid calendar date.",
   "Appointment time must be valid": "Choose a valid appointment time.",
-  "Future appointments cannot be marked as completed": "This appointment cannot be completed before its scheduled date.",
+  "Future appointments cannot be marked as completed": "This appointment cannot be completed before its scheduled time.",
   "This date is no longer available. Please select another date.": "This date is no longer available. Please select another date.",
   "You already have an appointment request for this date.": "You already have an appointment request for this date.",
   "Appointment not found": "Appointment not found.",

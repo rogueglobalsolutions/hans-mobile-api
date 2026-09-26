@@ -811,6 +811,27 @@ export async function enforceTrainingPaymentDeadlines() {
   for (const request of requests) {
     const deadlineTraining = request.requestedTraining ?? request.enrollment.training;
     if (!deadlineTraining.scheduledAt || countBusinessDays(now, deadlineTraining.scheduledAt) >= 10) continue;
+    if (request.stripePaymentIntentId) {
+      const intent = await stripe.paymentIntents.retrieve(request.stripePaymentIntentId);
+      if (intent.status === "succeeded") {
+        await confirmRescheduleFee(request.enrollment.userId, request.id, intent.id);
+        continue;
+      }
+      if (intent.status === "processing") continue;
+      if (intent.status !== "canceled") {
+        try {
+          await stripe.paymentIntents.cancel(intent.id);
+        } catch (error) {
+          const latest = await stripe.paymentIntents.retrieve(intent.id);
+          if (latest.status === "succeeded") {
+            await confirmRescheduleFee(request.enrollment.userId, request.id, latest.id);
+            continue;
+          }
+          if (latest.status === "processing") continue;
+          if (latest.status !== "canceled") throw error;
+        }
+      }
+    }
     const paidAmount = request.enrollment.paidAmount ?? 0;
     const policyPenalty = Math.round(
       (request.enrollment.trainingPriceAmount ?? request.enrollment.training.price) * 0.5,
@@ -836,6 +857,7 @@ export async function enforceTrainingPaymentDeadlines() {
         where: { id: request.id, status: TrainingRequestStatus.PAYMENT_REQUIRED },
         data: {
           status: TrainingRequestStatus.CANCELLED,
+          feePaymentStatus: PaymentStatus.FAILED,
           refundAmount: refundId ? refundAmount : 0,
           penaltyAmount: paidAmount - (refundId ? refundAmount : 0),
           stripeRefundId: refundId,

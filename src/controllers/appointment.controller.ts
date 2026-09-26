@@ -7,7 +7,7 @@ import { sanitizeError } from "../utils/errors";
 export async function createAppointment(req: Request, res: Response) {
   try {
     const medUserId = (req as any).userId;
-    const { date, time, notes, salesRepId } = req.body;
+    const { date, time, timeZone, notes, salesRepId } = req.body;
 
     const errors: string[] = [];
 
@@ -20,6 +20,9 @@ export async function createAppointment(req: Request, res: Response) {
     if (!salesRepId || typeof salesRepId !== "string" || !salesRepId.trim()) {
       errors.push("A sales representative must be selected");
     }
+    if (timeZone !== undefined && typeof timeZone !== "string") {
+      errors.push("Valid appointment time zone is required");
+    }
 
     if (errors.length > 0) {
       res.status(400).json({ success: false, message: "Validation failed", errors });
@@ -31,6 +34,7 @@ export async function createAppointment(req: Request, res: Response) {
       salesRepId: salesRepId.trim(),
       date: date.trim(),
       time: time.trim(),
+      timeZone: typeof timeZone === "string" ? timeZone.trim() : undefined,
       notes: typeof notes === "string" ? notes.trim() : undefined,
     });
 

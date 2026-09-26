@@ -3,6 +3,7 @@ import {
   sendAppointmentApprovalEmail,
   sendAppointmentRejectionEmail,
 } from "./email.service";
+import { appointmentHasStarted, normalizeAppointmentTimeZone } from "../utils/appointmentTime";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -11,6 +12,7 @@ interface CreateAppointmentInput {
   salesRepId?: string;
   date: string;   // "YYYY-MM-DD"
   time: string;   // "10:00 AM"
+  timeZone?: string;
   notes?: string;
 }
 
@@ -21,6 +23,7 @@ export async function createAppointment({
   salesRepId,
   date,
   time,
+  timeZone,
   notes,
 }: CreateAppointmentInput) {
   const [year, month, day] = date.split("-").map(Number);
@@ -32,12 +35,9 @@ export async function createAppointment({
   if (!/^(0?[1-9]|1[0-2]):[0-5]\d (AM|PM)$/.test(time)) {
     throw new Error("Appointment time must be valid");
   }
-  // Validate date is not in the past
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const appointmentDate = new Date(date);
-  if (appointmentDate < today) {
-    throw new Error("Appointment date must be in the future");
+  const normalizedTimeZone = normalizeAppointmentTimeZone(timeZone);
+  if (appointmentHasStarted(date, time, normalizedTimeZone)) {
+    throw new Error("Appointment date and time must be in the future");
   }
 
   // Check the date isn't already blocked by an approved appointment
@@ -66,6 +66,7 @@ export async function createAppointment({
       salesRepId: salesRepId || null,
       date,
       time,
+      timeZone: normalizedTimeZone,
       notes: notes?.trim() || null,
     },
   });
@@ -86,6 +87,7 @@ export async function getMyAppointments(medUserId: string) {
     id: a.id,
     date: a.date,
     time: a.time,
+    timeZone: a.timeZone ?? normalizeAppointmentTimeZone(),
     notes: a.notes,
     status: a.status,
     zoomLink: a.zoomLink,
@@ -126,6 +128,7 @@ export async function getAppointmentRequests() {
     requesterEmail: a.medUser.email,
     date: a.date,
     time: a.time,
+    timeZone: a.timeZone ?? normalizeAppointmentTimeZone(),
     notes: a.notes,
     status: a.status,
     rejectionReason: a.rejectionReason,
@@ -159,6 +162,7 @@ export async function approveAppointment(appointmentId: string) {
     appointment.medUser.fullName,
     appointment.date,
     appointment.time,
+    appointment.timeZone ?? normalizeAppointmentTimeZone(),
     zoomLink
   );
 
@@ -188,6 +192,7 @@ export async function rejectAppointment(appointmentId: string, reason: string) {
     appointment.medUser.fullName,
     appointment.date,
     appointment.time,
+    appointment.timeZone ?? normalizeAppointmentTimeZone(),
     reason
   );
 
@@ -202,6 +207,10 @@ export async function completeAppointment(appointmentId: string) {
   if (!appointment) throw new Error("Appointment not found");
   if (appointment.status !== "APPROVED") {
     throw new Error("Only approved appointments can be marked as completed");
+  }
+  if (!appointmentHasStarted(appointment.date, appointment.time,
+    appointment.timeZone ?? normalizeAppointmentTimeZone())) {
+    throw new Error("Future appointments cannot be marked as completed");
   }
 
   await prisma.appointment.update({
@@ -229,6 +238,7 @@ export async function getSalesRepAppointments(salesRepId: string) {
     requesterEmail: a.medUser.email,
     date: a.date,
     time: a.time,
+    timeZone: a.timeZone ?? normalizeAppointmentTimeZone(),
     notes: a.notes,
     status: a.status,
     rejectionReason: a.rejectionReason,
@@ -267,6 +277,7 @@ export async function approveAppointmentBySalesRep(
     appointment.medUser.fullName,
     appointment.date,
     appointment.time,
+    appointment.timeZone ?? normalizeAppointmentTimeZone(),
     zoomLink
   );
 
@@ -303,6 +314,7 @@ export async function rejectAppointmentBySalesRep(
     appointment.medUser.fullName,
     appointment.date,
     appointment.time,
+    appointment.timeZone ?? normalizeAppointmentTimeZone(),
     reason
   );
 
@@ -324,9 +336,8 @@ export async function completeAppointmentBySalesRep(
   if (appointment.status !== "APPROVED") {
     throw new Error("Only approved appointments can be marked as completed");
   }
-  const today = new Date();
-  const localDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  if (appointment.date > localDate) {
+  if (!appointmentHasStarted(appointment.date, appointment.time,
+    appointment.timeZone ?? normalizeAppointmentTimeZone())) {
     throw new Error("Future appointments cannot be marked as completed");
   }
 

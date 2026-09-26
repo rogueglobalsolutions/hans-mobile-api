@@ -47,13 +47,14 @@ export async function sendAppointmentApprovalEmail(
   fullName: string,
   date: string,
   time: string,
+  timeZone: string,
   zoomLink: string
 ): Promise<boolean> {
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
     console.log(`\n========== APPOINTMENT APPROVAL EMAIL ==========`);
     console.log(`To: ${to}`);
     console.log(`Name: ${fullName}`);
-    console.log(`Date: ${date} at ${time}`);
+    console.log(`Date: ${date} at ${time} (${timeZone})`);
     console.log(`Zoom Link: ${zoomLink}`);
     console.log(`================================================\n`);
     return true;
@@ -71,7 +72,7 @@ export async function sendAppointmentApprovalEmail(
           <p>Your appointment request has been approved. Here are your details:</p>
           <div style="background: #f0f4ff; border-radius: 8px; padding: 16px; margin: 20px 0;">
             <p style="margin: 0 0 8px;"><strong>Date:</strong> ${date}</p>
-            <p style="margin: 0 0 8px;"><strong>Time:</strong> ${time}</p>
+            <p style="margin: 0 0 8px;"><strong>Time:</strong> ${time} (${timeZone})</p>
             <p style="margin: 0;"><strong>Meeting Link:</strong> <a href="${zoomLink}" style="color: #2563eb;">${zoomLink}</a></p>
           </div>
           <p>Please join the meeting using the link above at the scheduled time.</p>
@@ -91,13 +92,14 @@ export async function sendAppointmentRejectionEmail(
   fullName: string,
   date: string,
   time: string,
+  timeZone: string,
   reason: string
 ): Promise<boolean> {
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
     console.log(`\n========== APPOINTMENT REJECTION EMAIL ==========`);
     console.log(`To: ${to}`);
     console.log(`Name: ${fullName}`);
-    console.log(`Date: ${date} at ${time}`);
+    console.log(`Date: ${date} at ${time} (${timeZone})`);
     console.log(`Reason: ${reason}`);
     console.log(`=================================================\n`);
     return true;
@@ -112,7 +114,7 @@ export async function sendAppointmentRejectionEmail(
         <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto;">
           <h2 style="color: #E22A44;">Appointment Request Update</h2>
           <p>Hi ${fullName},</p>
-          <p>Unfortunately, your appointment request for <strong>${date} at ${time}</strong> was not approved.</p>
+          <p>Unfortunately, your appointment request for <strong>${date} at ${time} (${timeZone})</strong> was not approved.</p>
           <div style="background: #fff5f5; border-left: 4px solid #E22A44; padding: 12px 16px; margin: 20px 0; border-radius: 4px;">
             <p style="margin: 0; color: #374151;"><strong>Reason:</strong> ${reason}</p>
           </div>

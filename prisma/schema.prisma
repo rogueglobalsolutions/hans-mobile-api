@@ -699,6 +699,7 @@ model Appointment {
   salesRep        User?             @relation("SalesRepAppointments", fields: [salesRepId], references: [id], onDelete: SetNull)
   date            String // "YYYY-MM-DD" e.g. "2026-03-18"
   time            String // e.g. "10:00 AM"
+  timeZone        String? // IANA zone; legacy rows use the documented Pacific fallback
   notes           String? // Optional context from MED user
   status          AppointmentStatus @default(PENDING)
   zoomLink        String? // Filled on approval from ZOOM_MEETING_LINK env var
