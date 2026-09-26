@@ -100,6 +100,7 @@ enum CreditReservationStatus {
 
 enum CreditTransactionType {
   EARNED // Credit added — e.g. enrolled in a training
+  RESTORED // Previously spent credit returned after an order refund
   SPENT // Credit deducted — e.g. store purchase
   EXPIRED
 }
@@ -228,6 +229,7 @@ model User {
   baEntries                BeforeAndAfterEntry[]   @relation("UserBAEntries")
   contestEntries           ContestEntry[]          @relation("UserContestEntries")
   contestLikes             ContestLike[]           @relation("AdminContestLikes")
+  contestWeekResults       ContestWeekResult[]     @relation("ContestWeekResolver")
   commerceOrders           Order[]                 @relation("CommerceCustomerOrders")
   verifiedCommerceOrders   Order[]                 @relation("CommerceOrderVerifier")
   commerceStatusUpdates    OrderStatusHistory[]    @relation("CommerceStatusUpdatedBy")
@@ -626,18 +628,19 @@ model OrderStatusHistory {
 }
 
 model OrderRefund {
-  id             String            @id @default(uuid())
-  orderId        String
-  order          Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  amountCents    Int
-  currency       String            @default("USD")
-  reason         String?
-  status         OrderRefundStatus @default(PENDING)
-  stripeRefundId String?
-  requestedById  String?
-  requestedBy    User?             @relation("CommerceRefundRequester", fields: [requestedById], references: [id], onDelete: SetNull)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  id                   String            @id @default(uuid())
+  orderId              String
+  order                Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amountCents          Int
+  forfeitedCreditCents Int               @default(0)
+  currency             String            @default("USD")
+  reason               String?
+  status               OrderRefundStatus @default(PENDING)
+  stripeRefundId       String?
+  requestedById        String?
+  requestedBy          User?             @relation("CommerceRefundRequester", fields: [requestedById], references: [id], onDelete: SetNull)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
 
   @@index([orderId])
   @@index([requestedById])
@@ -769,6 +772,12 @@ enum MediaSection {
   AFTER
 }
 
+enum ContestWeekStatus {
+  WINNER
+  TIE
+  NO_WINNER
+}
+
 // ─── B&A Contest ──────────────────────────────────────────────────────────────
 
 model ContestEntry {
@@ -779,8 +788,25 @@ model ContestEntry {
   description String
   media       ContestEntryMedia[]
   likes       ContestLike[]
+  weeklyWins  ContestWeekResult[]
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
+}
+
+model ContestWeekResult {
+  id            String            @id @default(uuid())
+  weekKey       String            @unique
+  status        ContestWeekStatus
+  winningVotes  Int               @default(0)
+  winnerEntryId String?
+  winnerEntry   ContestEntry?     @relation(fields: [winnerEntryId], references: [id], onDelete: SetNull)
+  resolvedById  String?
+  resolvedBy    User?             @relation("ContestWeekResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([winnerEntryId])
+  @@index([resolvedById])
 }
 
 model ContestEntryMedia {

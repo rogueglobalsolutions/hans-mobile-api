@@ -57,7 +57,7 @@ export async function sendAppointmentApprovalEmail(
     console.log(`Date: ${date} at ${time} (${timeZone})`);
     console.log(`Zoom Link: ${zoomLink}`);
     console.log(`================================================\n`);
-    return true;
+    return false;
   }
 
   try {
@@ -73,9 +73,9 @@ export async function sendAppointmentApprovalEmail(
           <div style="background: #f0f4ff; border-radius: 8px; padding: 16px; margin: 20px 0;">
             <p style="margin: 0 0 8px;"><strong>Date:</strong> ${date}</p>
             <p style="margin: 0 0 8px;"><strong>Time:</strong> ${time} (${timeZone})</p>
-            <p style="margin: 0;"><strong>Meeting Link:</strong> <a href="${zoomLink}" style="color: #2563eb;">${zoomLink}</a></p>
+            ${zoomLink ? `<p style="margin: 0;"><strong>Meeting Link:</strong> <a href="${zoomLink}" style="color: #2563eb;">${zoomLink}</a></p>` : ""}
           </div>
-          <p>Please join the meeting using the link above at the scheduled time.</p>
+          <p>${zoomLink ? "Please join the meeting using the link above at the scheduled time." : "The team will share joining details with you."}</p>
           <p style="color: #666; font-size: 14px; margin-top: 30px;">Thank you!</p>
         </div>
       `,

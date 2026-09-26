@@ -190,6 +190,23 @@ export async function updateProductVariantStock(req: Request, res: Response) {
   }
 }
 
+export async function updateProductVariantPrice(req: Request, res: Response) {
+  try {
+    if (req.body.price === undefined || req.body.price === null || req.body.price === "") {
+      res.status(400).json({ success: false, message: "Price is required" });
+      return;
+    }
+    const data = await commerceService.updateProductVariantPrice(
+      param(req.params.id),
+      param(req.params.variantId),
+      req.body.price,
+    );
+    res.json({ success: true, data });
+  } catch (err) {
+    sendError(res, err, "updateCommerceProductVariantPrice", 400);
+  }
+}
+
 export async function getLowStockProducts(req: Request, res: Response) {
   try {
     const data = await commerceService.getLowStockProducts(num(req.query.threshold));

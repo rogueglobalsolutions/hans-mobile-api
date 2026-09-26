@@ -1,0 +1,4 @@
+ALTER TYPE "CreditTransactionType" ADD VALUE IF NOT EXISTS 'RESTORED';
+
+ALTER TABLE "OrderRefund"
+  ADD COLUMN "forfeitedCreditCents" INTEGER NOT NULL DEFAULT 0;

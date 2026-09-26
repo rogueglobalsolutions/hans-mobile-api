@@ -79,6 +79,7 @@ router.get("/ba/entries/:id", baController.getEntryByIdAdmin);
 router.get("/ba/contest", baController.getAllContestEntries);
 router.get("/ba/contest/:id", baController.getContestEntryByIdAdmin);
 router.post("/ba/contest/:id/like", baController.toggleContestLike);
+router.post("/ba/contest/weeks/:weekKey/resolve", baController.resolveContestTie);
 router.get("/ba/stats", baController.getBAStats);
 
 // ─── Sales Rep management ─────────────────────────────────────────────────────
@@ -118,6 +119,7 @@ router.patch("/commerce/products/:id", commerceController.updateProduct);
 router.patch("/commerce/products/:id/status", commerceController.updateProductStatus);
 router.patch("/commerce/products/:id/stock", commerceController.updateProductStock);
 router.patch("/commerce/products/:id/variants/:variantId/stock", commerceController.updateProductVariantStock);
+router.patch("/commerce/products/:id/variants/:variantId/price", commerceController.updateProductVariantPrice);
 
 router.get("/commerce/collections", commerceController.getCollections);
 router.get("/commerce/inventory", commerceController.getInventory);

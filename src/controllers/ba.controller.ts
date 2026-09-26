@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import * as baService from "../services/ba.service";
+import { resolveContestTie as resolveContestWeekTie } from "../services/contestWeek.service";
 import { sanitizeError } from "../utils/errors";
 import { MediaSection } from "../generated/prisma/enums";
 import fs from "fs";
@@ -254,6 +255,21 @@ export async function toggleContestLike(req: Request, res: Response) {
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "toggleContestLike") });
+  }
+}
+
+export async function resolveContestTie(req: Request, res: Response) {
+  try {
+    const adminId = (req as any).userId as string;
+    const weekKey = req.params.weekKey as string;
+    const entryId = req.body?.entryId;
+    if (typeof entryId !== "string" || !entryId.trim()) {
+      return res.status(400).json({ success: false, message: "Choose a tied entry" });
+    }
+    const result = await resolveContestWeekTie(adminId, weekKey, entryId);
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    return res.status(400).json({ success: false, message: sanitizeError(error, "resolveContestTie") });
   }
 }
 

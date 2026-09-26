@@ -2,6 +2,7 @@ import prisma from "../config/prisma";
 import { MediaSection } from "../generated/prisma/enums";
 import fs from "fs";
 import path from "path";
+import { contestWeekKey, getContestEntryStatuses } from "./contestWeek.service";
 
 // ─── Before & After Entries (MED user) ────────────────────────────────────────
 
@@ -88,7 +89,7 @@ export async function createContestEntry(
 }
 
 export async function getMyContestEntries(userId: string) {
-  return prisma.contestEntry.findMany({
+  const entries = await prisma.contestEntry.findMany({
     where: { userId },
     include: {
       media: true,
@@ -96,6 +97,8 @@ export async function getMyContestEntries(userId: string) {
     },
     orderBy: { createdAt: "desc" },
   });
+  const statuses = await getContestEntryStatuses();
+  return entries.map((entry) => ({ ...entry, ...statuses.get(entry.id) }));
 }
 
 export async function getMyContestEntryById(userId: string, entryId: string) {
@@ -108,7 +111,8 @@ export async function getMyContestEntryById(userId: string, entryId: string) {
     },
   });
   if (!entry) throw new Error("Contest entry not found");
-  return entry;
+  const statuses = await getContestEntryStatuses();
+  return { ...entry, ...statuses.get(entry.id) };
 }
 
 export async function deleteContestEntry(userId: string, entryId: string) {
@@ -117,6 +121,9 @@ export async function deleteContestEntry(userId: string, entryId: string) {
     include: { media: true },
   });
   if (!entry) throw new Error("Contest entry not found");
+  if (contestWeekKey(entry.createdAt) < contestWeekKey(new Date())) {
+    throw new Error("Closed contest entries cannot be deleted");
+  }
 
   for (const media of entry.media) {
     const filePath = path.join(process.cwd(), media.filePath);
@@ -163,8 +170,11 @@ export async function getAllContestEntries(adminId: string) {
     orderBy: { createdAt: "desc" },
   });
 
+  const statuses = await getContestEntryStatuses();
+
   return entries.map((e) => ({
     ...e,
+    ...statuses.get(e.id),
     heartCount: e._count.likes,
     hearted: e.likes.length > 0,
     likes: undefined,
@@ -184,8 +194,11 @@ export async function getContestEntryByIdAdmin(adminId: string, entryId: string)
   });
   if (!entry) throw new Error("Contest entry not found");
 
+  const statuses = await getContestEntryStatuses();
+
   return {
     ...entry,
+    ...statuses.get(entry.id),
     heartCount: entry._count.likes,
     hearted: entry.likes.length > 0,
     likes: undefined,
@@ -196,6 +209,9 @@ export async function getContestEntryByIdAdmin(adminId: string, entryId: string)
 export async function toggleContestLike(adminId: string, entryId: string) {
   const entry = await prisma.contestEntry.findUnique({ where: { id: entryId } });
   if (!entry) throw new Error("Contest entry not found");
+  if (contestWeekKey(entry.createdAt) < contestWeekKey(new Date())) {
+    throw new Error("Voting has closed for this contest week");
+  }
 
   const existing = await prisma.contestLike.findUnique({
     where: { entryId_adminId: { entryId, adminId } },

@@ -94,7 +94,7 @@ export async function approveAppointment(req: Request, res: Response) {
     const appointmentId = req.params.id as string;
     const result = await appointmentService.approveAppointment(appointmentId);
 
-    res.json({ success: true, message: result.message });
+    res.json({ success: true, message: result.message, data: { emailDelivered: result.emailDelivered } });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "approveAppointment") });
   }
@@ -152,7 +152,7 @@ export async function approveAppointmentBySalesRep(req: Request, res: Response) 
     const appointmentId = req.params.id as string;
     const result = await appointmentService.approveAppointmentBySalesRep(appointmentId, salesRepId);
 
-    res.json({ success: true, message: result.message });
+    res.json({ success: true, message: result.message, data: { emailDelivered: result.emailDelivered } });
   } catch (error) {
     res.status(400).json({ success: false, message: sanitizeError(error, "approveAppointmentBySalesRep") });
   }

@@ -28,6 +28,7 @@ import adsRoutes from "./routes/ads.routes";
 import discountRoutes from "./routes/discount.routes";
 import webAuthRoutes from "./routes/web/webAuth.routes";
 import { enforceTrainingPaymentDeadlines } from "./services/trainingLifecycle.service";
+import { finalizeClosedContestWeeks } from "./services/contestWeek.service";
 
 const app = express();
 const server = http.createServer(app);
@@ -93,9 +94,15 @@ server.listen(PORT, () => {
   enforceTrainingPaymentDeadlines().catch((error) => {
     console.error("Failed to enforce training payment deadlines:", error);
   });
+  finalizeClosedContestWeeks().catch((error) => {
+    console.error("Failed to finalize closed contest weeks:", error);
+  });
   const deadlineTimer = setInterval(() => {
     enforceTrainingPaymentDeadlines().catch((error) => {
       console.error("Failed to enforce training payment deadlines:", error);
+    });
+    finalizeClosedContestWeeks().catch((error) => {
+      console.error("Failed to finalize closed contest weeks:", error);
     });
   }, 60 * 60 * 1000);
   deadlineTimer.unref();

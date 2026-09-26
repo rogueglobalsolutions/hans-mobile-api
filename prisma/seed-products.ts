@@ -125,7 +125,6 @@ async function main() {
           description: sanitizeValue(first.product_description) ?? "",
           vendor: vendorName,
           category: vendorName,
-          priceCents: firstPriceCents,
           assetPath,
           shippingInfo: sanitizeValue(first.shipping),
           returnAndExchange: sanitizeValue(first.return_and_exchange),
@@ -136,8 +135,7 @@ async function main() {
           securePackaging: sanitizeValue(first.secure_packaging) === "yes",
           groundShippingOnly: sanitizeValue(first.ground_shipping_only) === "yes",
           creditEligible: vendorName.toLowerCase() === "mint",
-          stripeProductId,
-          stripeDefaultPriceId,
+          // Existing prices and Stripe IDs belong to the database after Admin edits.
         },
       });
 
@@ -159,15 +157,18 @@ async function main() {
       for (const variant of variants) {
         const label = sanitizeValue(variant.variant) ?? "Default";
         const existingVariant = existingVariants.find((item) => item.label === label);
-        const data = {
-          label,
-          priceCents: toCents(variant.product_price),
-          stripePriceId: sanitizeValue(variant.stripePriceId),
-        };
         if (existingVariant) {
-          await prisma.productVariant.update({ where: { id: existingVariant.id }, data });
+          await prisma.productVariant.update({ where: { id: existingVariant.id }, data: { label } });
         } else {
-          await prisma.productVariant.create({ data: { productId: id, stockQty: null, ...data } });
+          await prisma.productVariant.create({
+            data: {
+              productId: id,
+              stockQty: null,
+              label,
+              priceCents: toCents(variant.product_price),
+              stripePriceId: sanitizeValue(variant.stripePriceId),
+            },
+          });
         }
       }
 

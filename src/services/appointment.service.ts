@@ -5,6 +5,16 @@ import {
 } from "./email.service";
 import { appointmentHasStarted, normalizeAppointmentTimeZone } from "../utils/appointmentTime";
 
+export function canCompleteAppointment(appointment: { status: string; date: string; time: string; timeZone: string | null }) {
+  if (appointment.status !== "APPROVED") return false;
+  try {
+    return appointmentHasStarted(appointment.date, appointment.time,
+      appointment.timeZone ?? normalizeAppointmentTimeZone());
+  } catch {
+    return false;
+  }
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CreateAppointmentInput {
@@ -131,6 +141,7 @@ export async function getAppointmentRequests() {
     timeZone: a.timeZone ?? normalizeAppointmentTimeZone(),
     notes: a.notes,
     status: a.status,
+    canComplete: canCompleteAppointment(a),
     rejectionReason: a.rejectionReason,
     salesRepName: a.salesRep?.fullName ?? null,
     createdAt: a.createdAt,
@@ -157,7 +168,7 @@ export async function approveAppointment(appointmentId: string) {
     data: { status: "APPROVED", zoomLink },
   });
 
-  await sendAppointmentApprovalEmail(
+  const emailDelivered = await sendAppointmentApprovalEmail(
     appointment.medUser.email,
     appointment.medUser.fullName,
     appointment.date,
@@ -166,7 +177,7 @@ export async function approveAppointment(appointmentId: string) {
     zoomLink
   );
 
-  return { message: "Appointment approved successfully" };
+  return { message: "Appointment approved successfully", emailDelivered };
 }
 
 export async function rejectAppointment(appointmentId: string, reason: string) {
@@ -241,6 +252,7 @@ export async function getSalesRepAppointments(salesRepId: string) {
     timeZone: a.timeZone ?? normalizeAppointmentTimeZone(),
     notes: a.notes,
     status: a.status,
+    canComplete: canCompleteAppointment(a),
     rejectionReason: a.rejectionReason,
     createdAt: a.createdAt,
   }));
@@ -272,7 +284,7 @@ export async function approveAppointmentBySalesRep(
     data: { status: "APPROVED", zoomLink },
   });
 
-  await sendAppointmentApprovalEmail(
+  const emailDelivered = await sendAppointmentApprovalEmail(
     appointment.medUser.email,
     appointment.medUser.fullName,
     appointment.date,
@@ -281,7 +293,7 @@ export async function approveAppointmentBySalesRep(
     zoomLink
   );
 
-  return { message: "Appointment approved successfully" };
+  return { message: "Appointment approved successfully", emailDelivered };
 }
 
 export async function rejectAppointmentBySalesRep(

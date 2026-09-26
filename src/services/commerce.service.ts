@@ -505,7 +505,7 @@ export async function getProducts(filters: ProductFilters = {}) {
       skip,
       take: limit,
       include: {
-        variants: { orderBy: { createdAt: "asc" } },
+        variants: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
         images: { orderBy: { sortOrder: "asc" } },
       },
     }),
@@ -538,7 +538,7 @@ export async function getProductById(productId: string, publicOnly = false) {
       ...(publicOnly ? { status: ProductStatus.ACTIVE } : {}),
     },
     include: {
-      variants: { orderBy: { createdAt: "asc" } },
+      variants: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       images: { orderBy: { sortOrder: "asc" } },
       stockAuditLogs: { orderBy: { createdAt: "desc" }, take: 1 },
     },
@@ -670,21 +670,125 @@ export async function createProduct(input: CreateProductInput) {
   return formatProduct(product);
 }
 
+function validateProductPrice(value: unknown): number {
+  const amount = Number(value);
+  const cents = Math.round(amount * 100);
+  if (!Number.isFinite(amount) || cents <= 0 || Math.abs(amount * 100 - cents) > 0.000001) {
+    throw new Error("Enter a positive price in USD with no more than two decimals");
+  }
+  return cents;
+}
+
+async function createReplacementStripePrice(
+  productId: string,
+  stripeProductId: string | null,
+  oldPriceId: string | null,
+  amountCents: number,
+  variantId?: string,
+) {
+  if (!stripeProductId || !oldPriceId) {
+    throw new Error("Configure the Stripe product and price before changing its price");
+  }
+
+  try {
+    const oldPrice = await stripe.prices.retrieve(oldPriceId);
+    const priceProductId = typeof oldPrice.product === "string" ? oldPrice.product : oldPrice.product.id;
+    if (!oldPrice.active || oldPrice.type !== "one_time" || oldPrice.currency !== "usd" ||
+        priceProductId !== stripeProductId || oldPrice.unit_amount == null) {
+      throw new Error("The linked Stripe price does not match this product");
+    }
+    if (oldPrice.unit_amount === amountCents) return oldPriceId;
+
+    const replacement = await stripe.prices.create(
+      {
+        product: stripeProductId,
+        currency: "usd",
+        unit_amount: amountCents,
+        metadata: { hansProductId: productId, ...(variantId ? { hansVariantId: variantId } : {}) },
+      },
+      { idempotencyKey: `hans-price-${productId}-${variantId || "default"}-${oldPriceId}-${amountCents}` },
+    );
+    return replacement.id;
+  } catch (error) {
+    if (error instanceof Error && error.message === "The linked Stripe price does not match this product") throw error;
+    console.error("[updateProductPrice] Stripe sync failed:", error);
+    throw new Error("Unable to sync price with Stripe. No changes were saved");
+  }
+}
+
+function stripeDefaultPriceId(product: Stripe.Product) {
+  return typeof product.default_price === "string"
+    ? product.default_price
+    : product.default_price?.id ?? null;
+}
+
+async function setStripeDefaultPrice(stripeProductId: string, priceId: string) {
+  try {
+    const current = await stripe.products.retrieve(stripeProductId);
+    await stripe.products.update(stripeProductId, { default_price: priceId });
+    return stripeDefaultPriceId(current);
+  } catch (error) {
+    console.error("[updateProductPrice] Stripe default price update failed:", error);
+    throw new Error("Unable to sync price with Stripe. No changes were saved");
+  }
+}
+
+async function reconcileStripeDefaultPrice(
+  productId: string,
+  stripeProductId: string,
+  attemptedPriceId: string,
+  previousDatabasePriceId: string | null,
+  previousStripeDefaultPriceId: string | null,
+) {
+  const [databaseProduct, stripeProduct] = await Promise.all([
+    prisma.product.findUnique({ where: { id: productId }, select: { stripeDefaultPriceId: true } }),
+    stripe.products.retrieve(stripeProductId),
+  ]);
+  if (stripeDefaultPriceId(stripeProduct) !== attemptedPriceId ||
+      databaseProduct?.stripeDefaultPriceId === attemptedPriceId) return;
+
+  const targetPriceId = databaseProduct?.stripeDefaultPriceId !== previousDatabasePriceId
+    ? databaseProduct?.stripeDefaultPriceId
+    : previousStripeDefaultPriceId;
+  await stripe.products.update(stripeProductId, { default_price: targetPriceId || "" });
+}
+
 export async function updateProduct(productId: string, adminId: string, input: any) {
-  const existing = await prisma.product.findUnique({ where: { id: productId } });
+  const existing = await prisma.product.findUnique({
+    where: { id: productId },
+    include: { variants: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] } },
+  });
   if (!existing) throw new Error("Product not found");
 
   const nextStockQty = input.stockQty != null ? Number(input.stockQty) : existing.stockQty;
   const stockChanged = nextStockQty !== existing.stockQty;
+  const primaryVariant = existing.variants[0];
+  const nextPriceCents = input.price != null ? validateProductPrice(input.price) : null;
+  const priceChanged = nextPriceCents != null &&
+    (nextPriceCents !== existing.priceCents || (primaryVariant && nextPriceCents !== primaryVariant.priceCents));
+  if (priceChanged && (input.stripeProductId !== undefined || input.stripeDefaultPriceId !== undefined)) {
+    throw new Error("Change Stripe mapping and product pricing separately");
+  }
+  if (priceChanged && !existing.stripeDefaultPriceId) {
+    throw new Error("Configure the Stripe product and price before changing its price");
+  }
+  const oldPriceId = primaryVariant?.stripePriceId || existing.stripeDefaultPriceId;
+  const replacementPriceId = priceChanged
+    ? await createReplacementStripePrice(productId, existing.stripeProductId, oldPriceId, nextPriceCents!, primaryVariant?.id)
+    : null;
 
-  const product = await prisma.$transaction(async (tx) => {
-    const updated = await tx.product.update({
-      where: { id: productId },
-      data: {
+  const previousStripeDefaultPriceId = priceChanged && replacementPriceId && existing.stripeProductId
+    ? await setStripeDefaultPrice(existing.stripeProductId, replacementPriceId)
+    : null;
+
+  let product;
+  try {
+    product = await prisma.$transaction(async (tx) => {
+      const data = {
         ...(input.name != null ? { name: String(input.name).trim() } : {}),
         ...(input.description != null ? { description: String(input.description).trim() } : {}),
         ...(input.category !== undefined ? { category: input.category || null } : {}),
-        ...(input.price != null ? { priceCents: fromDollars(Number(input.price)) } : {}),
+        ...(nextPriceCents != null ? { priceCents: nextPriceCents } : {}),
         ...(input.compareAtPrice !== undefined ? { compareAtPriceCents: fromDollars(input.compareAtPrice === null || input.compareAtPrice === "" ? null : Number(input.compareAtPrice)) } : {}),
         ...(input.stockQty != null ? { stockQty: nextStockQty } : {}),
         ...(input.lowStockThreshold != null ? { lowStockThreshold: Number(input.lowStockThreshold) } : {}),
@@ -692,33 +796,59 @@ export async function updateProduct(productId: string, adminId: string, input: a
           ? { status: String(input.status).toLowerCase() === "hidden" ? ProductStatus.HIDDEN : ProductStatus.ACTIVE }
           : {}),
         ...(input.stripeProductId !== undefined ? { stripeProductId: input.stripeProductId || null } : {}),
-        ...(input.stripeDefaultPriceId !== undefined ? { stripeDefaultPriceId: input.stripeDefaultPriceId || null } : {}),
+        ...(replacementPriceId ? { stripeDefaultPriceId: replacementPriceId }
+          : input.stripeDefaultPriceId !== undefined ? { stripeDefaultPriceId: input.stripeDefaultPriceId || null } : {}),
         ...(input.creditEligible !== undefined
           ? { creditEligible: input.creditEligible === true || input.creditEligible === "true" }
           : {}),
-      },
-      include: {
-        variants: true,
-        images: { orderBy: { sortOrder: "asc" } },
-        stockAuditLogs: { orderBy: { createdAt: "desc" }, take: 1 },
-      },
+      };
+
+      if (priceChanged) {
+        const result = await tx.product.updateMany({
+          where: {
+            id: productId,
+            priceCents: existing.priceCents,
+            stripeDefaultPriceId: existing.stripeDefaultPriceId,
+          },
+          data,
+        });
+        if (result.count !== 1) throw new Error("Product price changed. Refresh and try again");
+      } else {
+        await tx.product.update({ where: { id: productId }, data });
+      }
+
+      if (priceChanged && primaryVariant) {
+        const result = await tx.productVariant.updateMany({
+          where: { id: primaryVariant.id, productId, stripePriceId: primaryVariant.stripePriceId },
+          data: { priceCents: nextPriceCents, stripePriceId: replacementPriceId },
+        });
+        if (result.count !== 1) throw new Error("Product price changed. Refresh and try again");
+      }
+
+      if (stockChanged) {
+        await tx.stockAuditLog.create({
+          data: {
+            productId,
+            previousStockQty: existing.stockQty,
+            newStockQty: nextStockQty,
+            delta: nextStockQty - existing.stockQty,
+            note: input.adjustmentNote || input.note || null,
+            adjustedById: adminId,
+          },
+        });
+      }
+
+      return tx.product.findUniqueOrThrow({ where: { id: productId } });
     });
-
-    if (stockChanged) {
-      await tx.stockAuditLog.create({
-        data: {
-          productId,
-          previousStockQty: existing.stockQty,
-          newStockQty: nextStockQty,
-          delta: nextStockQty - existing.stockQty,
-          note: input.adjustmentNote || input.note || null,
-          adjustedById: adminId,
-        },
-      });
+  } catch (error) {
+    if (priceChanged && replacementPriceId && existing.stripeProductId) {
+      await reconcileStripeDefaultPrice(
+        productId, existing.stripeProductId, replacementPriceId,
+        existing.stripeDefaultPriceId, previousStripeDefaultPriceId,
+      ).catch((reconcileError) => console.error("[updateProductPrice] Stripe default reconciliation failed:", reconcileError));
     }
-
-    return updated;
-  });
+    throw error;
+  }
 
   if (input.name != null || input.description != null) {
     syncProductToJson({
@@ -730,6 +860,60 @@ export async function updateProduct(productId: string, adminId: string, input: a
   }
 
   return getProductById(product.id);
+}
+
+export async function updateProductVariantPrice(productId: string, variantId: string, price: unknown) {
+  const amountCents = validateProductPrice(price);
+  const product = await prisma.product.findUnique({
+    where: { id: productId },
+    include: { variants: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] } },
+  });
+  if (!product) throw new Error("Product not found");
+  const variant = product.variants.find((item) => item.id === variantId);
+  if (!variant) throw new Error("Variant not found");
+  if (variant.priceCents === amountCents) return getProductById(productId);
+  const isPrimary = product.variants[0]?.id === variantId;
+  if (isPrimary && !product.stripeDefaultPriceId) {
+    throw new Error("Configure the Stripe product and price before changing its price");
+  }
+
+  const replacementPriceId = await createReplacementStripePrice(
+    productId, product.stripeProductId, variant.stripePriceId, amountCents, variantId,
+  );
+  const previousStripeDefaultPriceId = isPrimary && product.stripeProductId
+    ? await setStripeDefaultPrice(product.stripeProductId, replacementPriceId)
+    : null;
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const result = await tx.productVariant.updateMany({
+        where: { id: variantId, productId, stripePriceId: variant.stripePriceId },
+        data: { priceCents: amountCents, stripePriceId: replacementPriceId },
+      });
+      if (result.count !== 1) throw new Error("Product price changed. Refresh and try again");
+      if (isPrimary) {
+        const productUpdate = await tx.product.updateMany({
+          where: {
+            id: productId,
+            priceCents: product.priceCents,
+            stripeDefaultPriceId: product.stripeDefaultPriceId,
+          },
+          data: { priceCents: amountCents, stripeDefaultPriceId: replacementPriceId },
+        });
+        if (productUpdate.count !== 1) throw new Error("Product price changed. Refresh and try again");
+      }
+    });
+  } catch (error) {
+    if (isPrimary && product.stripeProductId) {
+      await reconcileStripeDefaultPrice(
+        productId, product.stripeProductId, replacementPriceId,
+        product.stripeDefaultPriceId, previousStripeDefaultPriceId,
+      ).catch((reconcileError) => console.error("[updateProductPrice] Stripe default reconciliation failed:", reconcileError));
+    }
+    throw error;
+  }
+
+  return getProductById(productId);
 }
 
 export async function updateProductVariantStock(
@@ -1203,16 +1387,22 @@ export async function refundOrder(orderId: string, adminId: string, input: any =
     throw new Error("Order is not refundable");
   }
 
-  const previousRefundedCents = order.refunds
-    .filter((refund) => refund.status === OrderRefundStatus.SUCCEEDED)
+  const successfulRefunds = order.refunds
+    .filter((refund) => refund.status === OrderRefundStatus.SUCCEEDED);
+  const previousRefundedCents = successfulRefunds
     .reduce((sum, refund) => sum + refund.amountCents, 0);
-  const remainingCents = order.totalAmountCents - previousRefundedCents;
+  const previousForfeitedCents = successfulRefunds
+    .reduce((sum, refund) => sum + refund.forfeitedCreditCents, 0);
+  const previousProcessedCents = previousRefundedCents + previousForfeitedCents;
+  const remainingCents = order.totalAmountCents - previousProcessedCents;
   const requestedCents = input.amount != null ? fromDollars(Number(input.amount)) : remainingCents;
   const amountCents = Math.min(remainingCents, requestedCents ?? remainingCents);
   if (amountCents <= 0) throw new Error("Refund amount must be greater than zero");
 
   const fullRefund = amountCents >= remainingCents;
-  const remainingCreditCents = Math.max(0, order.creditAppliedCents - order.creditRefundedCents);
+  const remainingCreditCents = Math.max(0,
+    order.creditAppliedCents - order.creditRefundedCents - previousForfeitedCents,
+  );
   const creditRefundCents = fullRefund
     ? remainingCreditCents
     : Math.min(remainingCreditCents, Math.floor(amountCents / 100) * 100);
@@ -1221,13 +1411,17 @@ export async function refundOrder(orderId: string, adminId: string, input: any =
     (previousRefundedCents - order.creditRefundedCents),
   );
   const stripeRefundCents = fullRefund ? cardRemainingCents : amountCents - creditRefundCents;
+  if (stripeRefundCents < 0 || stripeRefundCents > cardRemainingCents ||
+      stripeRefundCents + creditRefundCents !== amountCents) {
+    throw new Error("Refund accounting is inconsistent for this order");
+  }
   if (stripeRefundCents > 0 && !order.stripePaymentIntentId) {
     throw new Error("No card payment found for this order");
   }
   const stripeRefund = stripeRefundCents > 0
     ? await stripe.refunds.create(
         { payment_intent: order.stripePaymentIntentId!, amount: stripeRefundCents, reason: input.stripeReason },
-        { idempotencyKey: `refund-order-${order.id}-${previousRefundedCents}-${amountCents}` },
+        { idempotencyKey: `refund-order-${order.id}-${previousProcessedCents}-${amountCents}` },
       )
     : null;
 
@@ -1243,7 +1437,7 @@ export async function refundOrder(orderId: string, adminId: string, input: any =
         await tx.creditTransaction.create({
           data: {
             userId: order.userId,
-            type: CreditTransactionType.EARNED,
+            type: CreditTransactionType.RESTORED,
             amount: restoredAmount,
             description: `Credit restored from refund for order ${order.orderNumber}`,
             referenceId: order.id,
@@ -1255,6 +1449,7 @@ export async function refundOrder(orderId: string, adminId: string, input: any =
       data: {
         orderId,
         amountCents: stripeRefundCents + restoredCreditCents,
+        forfeitedCreditCents: creditRefundCents - restoredCreditCents,
         reason: input.reason || null,
         status: OrderRefundStatus.SUCCEEDED,
         stripeRefundId: stripeRefund?.id ?? null,
@@ -1355,7 +1550,6 @@ export async function approveCancellationRequest(orderId: string, adminId: strin
   });
 
   const isRefundable =
-    !!order.stripePaymentIntentId &&
     (order.paymentStatus === CommercePaymentStatus.PAID ||
       order.paymentStatus === CommercePaymentStatus.PARTIALLY_REFUNDED);
   if (isRefundable) {
@@ -1604,7 +1798,7 @@ async function getFinancialTotals(startDate: Date, endDate: Date) {
         status: OrderRefundStatus.SUCCEEDED,
         createdAt: { gte: startDate, lte: endDate },
       },
-      _sum: { amountCents: true },
+      _sum: { amountCents: true, forfeitedCreditCents: true },
     }),
   ]);
 
@@ -1615,6 +1809,7 @@ async function getFinancialTotals(startDate: Date, endDate: Date) {
   );
   const creditsRedeemedCents = orders.reduce((sum, order) => sum + order.creditAppliedCents, 0);
   const refundsCents = refunds._sum.amountCents ?? 0;
+  const forfeitedCreditsCents = refunds._sum.forfeitedCreditCents ?? 0;
   const paidOrders = orders.length;
 
   return {
@@ -1622,7 +1817,8 @@ async function getFinancialTotals(startDate: Date, endDate: Date) {
     cardCollected: toDollars(cardCollectedCents),
     creditsRedeemed: toDollars(creditsRedeemedCents),
     refunds: toDollars(refundsCents),
-    netSales: toDollars(grossSalesCents - refundsCents),
+    forfeitedCredits: toDollars(forfeitedCreditsCents),
+    netSales: toDollars(grossSalesCents - refundsCents - forfeitedCreditsCents),
     paidOrders,
     averageOrderValue: paidOrders ? toDollars(Math.round(grossSalesCents / paidOrders)) : 0,
   };
@@ -2112,7 +2308,7 @@ async function prepareProductOrder(userId: string, input: CreateOrderIntentInput
     const quantity = Math.max(1, Number(requested.quantity) || 1);
     const product = await prisma.product.findFirst({
       where: { id: requested.productId, status: ProductStatus.ACTIVE },
-      include: { variants: true },
+      include: { variants: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] } },
     });
     if (!product) throw new Error("Product not found");
     if (product.stockQty < quantity) throw new Error(`Only ${product.stockQty} available for ${product.name}`);
