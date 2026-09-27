@@ -121,7 +121,6 @@ export async function createProduct(req: Request, res: Response) {
       usedWith: str(req.body.usedWith) ?? null,
       fdaCleared: bool(req.body.fdaCleared),
       securePackaging: bool(req.body.securePackaging),
-      groundShippingOnly: bool(req.body.groundShippingOnly),
       creditEligible: bool(req.body.creditEligible),
       variants,
     });

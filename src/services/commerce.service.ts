@@ -5,6 +5,7 @@ import { stripe } from "../config/stripe";
 import { syncProductToJson } from "./productJsonSync.service";
 import { UPS_DEFAULT_PACKAGE_WEIGHT_LBS } from "../config/ups";
 import * as upsService from "./ups.service";
+import { shippingFeeCents as calculateShippingFeeCents } from "./shippingPolicy";
 import {
   getSpendableCreditBalance,
   getUserCreditSummary,
@@ -581,7 +582,6 @@ interface CreateProductInput {
   usedWith?: string | null;
   fdaCleared?: boolean;
   securePackaging?: boolean;
-  groundShippingOnly?: boolean;
   creditEligible?: boolean;
   variants?: CreateProductVariantInput[];
 }
@@ -648,7 +648,7 @@ export async function createProduct(input: CreateProductInput) {
       usedWith: input.usedWith?.trim() || null,
       fdaCleared: input.fdaCleared ?? false,
       securePackaging: input.securePackaging ?? false,
-      groundShippingOnly: input.groundShippingOnly ?? false,
+      groundShippingOnly: false,
       creditEligible: input.creditEligible ?? false,
       variants: validVariants.length
         ? {
@@ -2131,6 +2131,15 @@ export async function generateUpsShippingLabel(orderId: string, adminId: string)
     throw new Error("Shipping address is incomplete");
   }
 
+  if (order.shippingMethod
+    && order.shippingMethod !== ShippingMethod.GROUND
+    && order.shippingMethod !== ShippingMethod.FREE_GROUND
+    && order.shippingMethod !== ShippingMethod.SECOND_DAY_AIR) {
+    throw new Error("Unsupported UPS shipping method");
+  }
+  const shippingMethod = order.shippingMethod === ShippingMethod.SECOND_DAY_AIR
+    ? ShippingMethod.SECOND_DAY_AIR
+    : ShippingMethod.GROUND;
   const activeKey = `UPS:${order.id}`;
   let pendingLabel;
   try {
@@ -2139,7 +2148,7 @@ export async function generateUpsShippingLabel(orderId: string, adminId: string)
         orderId,
         activeKey,
         status: ShippingLabelStatus.PENDING,
-        shippingMethod: ShippingMethod.GROUND,
+        shippingMethod,
         carrier: "UPS",
         requestedById: adminId,
       },
@@ -2161,7 +2170,7 @@ export async function generateUpsShippingLabel(orderId: string, adminId: string)
       0,
     );
 
-    const shipment = await upsService.createGroundShipment(
+    const shipment = await upsService.createShipment(
       {
         name: order.customerName,
         phone: order.customerPhone || undefined,
@@ -2173,6 +2182,7 @@ export async function generateUpsShippingLabel(orderId: string, adminId: string)
         country: order.shippingCountry,
       },
       totalWeightLbs,
+      shippingMethod,
     );
 
     fs.mkdirSync(SHIPPING_LABELS_DIR, { recursive: true });
@@ -2202,7 +2212,7 @@ export async function generateUpsShippingLabel(orderId: string, adminId: string)
           trackingNumber: shipment.trackingNumber,
           trackingUrl: shipment.trackingUrl,
           courierName: "UPS",
-          shippingMethod: ShippingMethod.GROUND,
+          shippingMethod,
         },
       });
       await tx.orderStatusHistory.create({
@@ -2287,6 +2297,10 @@ export async function voidShippingLabel(labelId: string, adminId: string) {
 }
 
 async function prepareProductOrder(userId: string, input: CreateOrderIntentInput) {
+  const shippingMethod = input.shippingMethod ?? ShippingMethod.GROUND;
+  if (shippingMethod !== ShippingMethod.GROUND && shippingMethod !== ShippingMethod.SECOND_DAY_AIR) {
+    throw new Error("Unsupported shipping method");
+  }
   const spendableCreditBalance = await getSpendableCreditBalance(userId);
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new Error("User not found");
@@ -2357,7 +2371,7 @@ async function prepareProductOrder(userId: string, input: CreateOrderIntentInput
     throw new Error("Shipping address is incomplete");
   }
 
-  const rate = await upsService.getGroundRate(
+  const rate = await upsService.getRate(
     {
       address1: shippingAddress1,
       address2: shippingAddress2,
@@ -2367,12 +2381,13 @@ async function prepareProductOrder(userId: string, input: CreateOrderIntentInput
       country: shippingCountry,
     },
     totalWeightLbs,
+    shippingMethod,
   );
-  const shippingFeeCents = Math.round(rate.amountUsd * 100);
-  const totalAmountCents = subtotalCents + shippingFeeCents;
   let creditAppliedCents = input.applyCredits
     ? Math.min(spendableCreditBalance * 100, creditEligibleSubtotalCents)
     : 0;
+  const shippingFeeCents = calculateShippingFeeCents(rate.amountUsd, subtotalCents - creditAppliedCents);
+  const totalAmountCents = subtotalCents + shippingFeeCents;
   if (totalAmountCents - creditAppliedCents > 0 && totalAmountCents - creditAppliedCents < 50) {
     creditAppliedCents = Math.max(0, totalAmountCents - 50);
     creditAppliedCents = Math.floor(creditAppliedCents / 100) * 100;
@@ -2395,7 +2410,7 @@ async function prepareProductOrder(userId: string, input: CreateOrderIntentInput
     shippingState,
     shippingZipCode,
     shippingCountry,
-    shippingMethod: input.shippingMethod ?? ShippingMethod.GROUND,
+    shippingMethod,
     notes: input.notes ?? null,
     rate,
   };

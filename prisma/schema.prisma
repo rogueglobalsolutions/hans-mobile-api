@@ -149,6 +149,7 @@ enum DeliveryStatus {
 enum ShippingMethod {
   GROUND
   FREE_GROUND
+  SECOND_DAY_AIR
   NEXT_DAY_AIR
   FREE_NEXT_DAY_AIR
   UPS_WORLDWIDE_SAVER

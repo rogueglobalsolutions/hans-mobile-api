@@ -63,7 +63,7 @@ async function normalizeDestinationAddress<T extends ShippingAddress>(destinatio
       item.name.toLowerCase() === countryInput.toLowerCase(),
   );
   if (!country) throw new Error("Shipping country is invalid");
-  if (country.iso2 !== "US") throw new Error("UPS Ground shipping is currently limited to US addresses");
+  if (country.iso2 !== "US") throw new Error("UPS shipping is currently limited to US addresses");
 
   const stateInput = destination.state.trim();
   const states = await getStatesOfCountry(country.iso2);
@@ -83,17 +83,23 @@ export interface RateQuote {
   currency: string;
 }
 
-const GROUND_SERVICE_CODE = "03";
+const DOMESTIC_SERVICES = {
+  GROUND: { code: "03", description: "Ground", name: "UPS Ground" },
+  SECOND_DAY_AIR: { code: "02", description: "2nd Day Air", name: "UPS 2nd Day Air" },
+} as const;
 
-// Rating API - published (non-negotiated) rates for UPS Ground.
+export type DomesticService = keyof typeof DOMESTIC_SERVICES;
+
+// Rating API - published (non-negotiated) rates for the selected UPS service.
 // Docs: https://developer.ups.com/api/reference?loc=en_US#operation/Rate
-export async function getGroundRate(destination: ShippingAddress, weightLbs: number): Promise<RateQuote> {
+export async function getRate(destination: ShippingAddress, weightLbs: number, method: DomesticService): Promise<RateQuote> {
   if (!isUpsConfigured()) {
     throw new Error("UPS is not configured");
   }
 
   const token = await getAccessToken();
   const normalizedDestination = await normalizeDestinationAddress(destination);
+  const service = DOMESTIC_SERVICES[method];
   const transactionId = `hans-${Date.now()}`;
 
   const requestBody = {
@@ -132,7 +138,7 @@ export async function getGroundRate(destination: ShippingAddress, weightLbs: num
             CountryCode: normalizedDestination.country,
           },
         },
-        Service: { Code: GROUND_SERVICE_CODE, Description: "Ground" },
+        Service: { Code: service.code, Description: service.description },
         Package: {
           PackagingType: { Code: "02", Description: "Package" },
           PackageWeight: {
@@ -172,8 +178,8 @@ export async function getGroundRate(destination: ShippingAddress, weightLbs: num
   }
 
   return {
-    serviceCode: GROUND_SERVICE_CODE,
-    serviceName: "UPS Ground",
+    serviceCode: service.code,
+    serviceName: service.name,
     amountUsd: Number(charge.MonetaryValue),
     currency: charge.CurrencyCode || "USD",
   };
@@ -196,9 +202,10 @@ export interface ShipmentResult {
 // (UPS_ACCOUNT_NUMBER) that's registered to the shipper address - unlike the
 // Rating API, UPS validates this strictly since it actually books the pickup.
 // Docs: https://developer.ups.com/api/reference?loc=en_US#operation/Shipment
-export async function createGroundShipment(
+export async function createShipment(
   destination: ShippingAddress & { name?: string; phone?: string },
   weightLbs: number,
+  method: DomesticService,
 ): Promise<ShipmentResult> {
   if (!isUpsConfigured()) {
     throw new Error("UPS is not configured");
@@ -212,6 +219,7 @@ export async function createGroundShipment(
 
   const token = await getAccessToken();
   const normalizedDestination = await normalizeDestinationAddress(destination);
+  const service = DOMESTIC_SERVICES[method];
   const transactionId = `hans-${Date.now()}`;
 
   const requestBody = {
@@ -264,7 +272,7 @@ export async function createGroundShipment(
             },
           ],
         },
-        Service: { Code: GROUND_SERVICE_CODE, Description: "Ground" },
+        Service: { Code: service.code, Description: service.description },
         Package: [
           {
             Packaging: { Code: "02", Description: "Package" },
@@ -315,8 +323,8 @@ export async function createGroundShipment(
     trackingNumber,
     shipmentId: results.ShipmentIdentificationNumber,
     trackingUrl: `https://www.ups.com/track?tracknum=${trackingNumber}`,
-    serviceCode: GROUND_SERVICE_CODE,
-    serviceName: "UPS Ground",
+    serviceCode: service.code,
+    serviceName: service.name,
     amountUsd: chargeValue != null ? Number(chargeValue) : null,
     currency: results?.ShipmentCharges?.TotalCharges?.CurrencyCode || "USD",
     labelFormat: "GIF",
