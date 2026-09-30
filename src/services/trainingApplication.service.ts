@@ -1,4 +1,5 @@
 import prisma from "../config/prisma";
+import { assertTrainingOpenForEnrollment } from "./trainingEnrollmentWindow";
 import {
   AccountStatus,
   Role,
@@ -22,10 +23,11 @@ function requireRecord(value: unknown, field: string) {
   return value as JsonRecord;
 }
 
-async function requireAvailableTraining(trainingId: string) {
+async function requireAvailableTraining(trainingId: string, forNewEnrollment = false) {
   const training = await prisma.training.findUnique({ where: { id: trainingId } });
   if (!training) throw new Error("Training not found");
   if (training.status !== TrainingStatus.ACTIVE) throw new Error("Training is not available for enrollment");
+  if (forNewEnrollment) assertTrainingOpenForEnrollment(training);
   return training;
 }
 
@@ -55,7 +57,7 @@ export async function saveTrainingApplication(
   trainingId: string,
   input: SaveTrainingApplicationInput,
 ) {
-  await requireAvailableTraining(trainingId);
+  await requireAvailableTraining(trainingId, true);
 
   const existingEnrollment = await prisma.enrollment.findUnique({
     where: { userId_trainingId: { userId, trainingId } },
@@ -97,7 +99,7 @@ export async function submitTrainingApplication(
   trainingId: string,
   termsVersion: string,
 ) {
-  await requireAvailableTraining(trainingId);
+  await requireAvailableTraining(trainingId, true);
   const application = await prisma.trainingApplication.findUnique({
     where: { userId_trainingId: { userId, trainingId } },
   });

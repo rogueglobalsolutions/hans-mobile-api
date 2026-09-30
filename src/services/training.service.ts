@@ -14,6 +14,7 @@ import { TRAINING_LEVEL_PRICING } from "../utils/trainingEnums";
 import { redeemDiscountCode } from "./discount.service";
 import { getSubmittedApplication } from "./trainingApplication.service";
 import { issueTrainingCredits } from "./credit.service";
+import { assertTrainingOpenForEnrollment, canConfirmPaymentAfterStart } from "./trainingEnrollmentWindow";
 import { countHeldTraineeSeats, countOccupiedTraineeSeats } from "./trainingSeat.service";
 import fs from "fs";
 import path from "path";
@@ -200,7 +201,7 @@ export async function deleteTraining(trainingId: string) {
   return { message: "Training deleted successfully" };
 }
 
-export async function getTrainings() {
+export async function getTrainings(requestingUserId?: string) {
   const trainings = await prisma.training.findMany({
     where: { status: TrainingStatus.ACTIVE },
     select: {
@@ -233,6 +234,17 @@ export async function getTrainings() {
 
   if (trainings.length === 0) return trainings;
   const now = new Date();
+  const existingEnrollments = requestingUserId
+    ? await prisma.enrollment.findMany({
+        where: {
+          userId: requestingUserId,
+          trainingId: { in: trainings.map((training) => training.id) },
+          paymentStatus: { notIn: [PaymentStatus.PENDING, PaymentStatus.FAILED] },
+        },
+        select: { trainingId: true },
+      })
+    : [];
+  const enrolledTrainingIds = new Set(existingEnrollments.map((enrollment) => enrollment.trainingId));
   const counts = await prisma.enrollment.groupBy({
     by: ["trainingId", "type"],
     where: {
@@ -266,6 +278,7 @@ export async function getTrainings() {
       enrolleeCount,
       heldSeatCount,
       observerCount,
+      isEnrolled: enrolledTrainingIds.has(training.id),
       availableSlots: Math.max(0, training.maxEnrollees - enrolleeCount - heldSeatCount),
       availableObserverSlots: Math.max(0, training.maxObservers - observerCount),
     };
@@ -409,6 +422,7 @@ export async function initiateEnrollment(
       await failEnrollment(intent.id, userId);
     }
   }
+  assertTrainingOpenForEnrollment(training);
 
   if (PREREQUISITE_LEVELS.has(training.level)) {
     const hasPrerequisite = await prisma.enrollment.findFirst({
@@ -462,6 +476,12 @@ export async function initiateEnrollment(
   const reservation = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${trainingId}))`;
     const now = new Date();
+    const currentTraining = await tx.training.findUnique({
+      where: { id: trainingId },
+      select: { status: true, scheduledAt: true },
+    });
+    if (!currentTraining) throw new Error("Training not found");
+    assertTrainingOpenForEnrollment(currentTraining, now);
     const [enrolleeCount, observerCount] = await Promise.all([
       countOccupiedTraineeSeats(tx, trainingId, now),
       tx.enrollment.count({
@@ -589,12 +609,22 @@ export async function confirmEnrollmentPayment(paymentIntentId: string, requesti
     return { message: "Payment was refunded", alreadyConfirmed: true };
   }
 
-  const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, { expand: ["latest_charge"] });
   if (paymentIntent.status !== "succeeded") throw new Error("Payment has not succeeded");
   if (paymentIntent.currency.toLowerCase() !== "usd" ||
       paymentIntent.amount_received !== Math.round((enrollment.paidAmount ?? 0) * 100)) {
     throw new Error("Payment amount does not match enrollment");
   }
+  const latestCharge = paymentIntent.latest_charge;
+  const paidAt = latestCharge && typeof latestCharge !== "string"
+    ? new Date(latestCharge.created * 1000)
+    : new Date();
+  const canConfirmAfterStart = canConfirmPaymentAfterStart(
+    enrollment.training.scheduledAt,
+    enrollment.reservationExpiresAt,
+    new Date(paymentIntent.created * 1000),
+    paidAt,
+  );
 
   const finalized = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${enrollment.trainingId}))`;
@@ -609,6 +639,7 @@ export async function confirmEnrollmentPayment(paymentIntentId: string, requesti
         });
     const capacity = enrollment.type === EnrollmentType.ENROLLEE
       ? enrollment.training.maxEnrollees : enrollment.training.maxObservers;
+    if (!canConfirmAfterStart) return "TRAINING_STARTED" as const;
     if (enrollment.training.status !== TrainingStatus.ACTIVE || occupied >= capacity) return "NO_CAPACITY" as const;
 
     const claimed = await tx.enrollment.updateMany({
@@ -624,7 +655,7 @@ export async function confirmEnrollmentPayment(paymentIntentId: string, requesti
     return "COMPLETED" as const;
   });
 
-  if (finalized === "NO_CAPACITY") {
+  if (finalized === "NO_CAPACITY" || finalized === "TRAINING_STARTED") {
     const refund = await stripe.refunds.create(
       { payment_intent: paymentIntentId },
       { idempotencyKey: `expired-training-reservation-${paymentIntentId}` },
@@ -639,7 +670,9 @@ export async function confirmEnrollmentPayment(paymentIntentId: string, requesti
         where: { id: attempt.id }, data: { status: PaymentStatus.REFUNDED },
       });
     });
-    throw new Error("The seat reservation expired and the payment was refunded");
+    throw new Error(finalized === "TRAINING_STARTED"
+      ? "Enrollment closed before this payment completed, so the payment was refunded"
+      : "The seat reservation expired and the payment was refunded");
   }
   if (finalized === "NOT_CLAIMED") {
     const current = await prisma.enrollment.findUnique({ where: { id: enrollment.id } });
@@ -703,6 +736,9 @@ export async function cancelTraining(trainingId: string, adminId: string) {
   const finalTrainingDate = training.endsAt ?? training.scheduledAt;
   if (finalTrainingDate && finalTrainingDate <= new Date()) {
     throw new Error("Completed training sessions cannot be cancelled");
+  }
+  if (training.enrollments.some((enrollment) => enrollment.attendanceStatus === EnrollmentAttendanceStatus.COMPLETED)) {
+    throw new Error("Training with completed enrollees cannot be cancelled");
   }
 
   const refunded: typeof training.enrollments = [];
@@ -860,6 +896,7 @@ export async function markEnrollmentCompleted(trainingId: string, enrollmentId: 
     completed.newlyCompleted &&
     completed.record.creditIssuedAt &&
     completed.record.creditExpiresAt &&
+    completed.record.creditExpiresAt > new Date() &&
     completed.record.creditAmount > 0
   ) {
     await sendTrainingCreditIssuedEmail({

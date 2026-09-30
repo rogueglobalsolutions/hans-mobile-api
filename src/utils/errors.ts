@@ -47,6 +47,8 @@ const SAFE_MESSAGES: Record<string, string> = {
   // Training enrollment & payment
   "Training not found": "Training not found.",
   "Training is not available for enrollment": "This training is not available for enrollment.",
+  "Enrollment is closed because this training has started": "Enrollment is closed because this training has started.",
+  "Enrollment closed before this payment completed, so the payment was refunded": "The training started before your payment completed. Your payment was refunded.",
   "Training is full": "This training is full. No more slots available.",
   "This training is full. No more slots available.": "This training is full. No more slots available.",
   "Submit the training application before payment": "Submit the training application before payment.",
@@ -121,6 +123,7 @@ const SAFE_MESSAGES: Record<string, string> = {
   "Product checkout is not configured": "Product checkout is not configured for this item yet.",
   "Shipping address is incomplete": "Please add a complete shipping address before checking out.",
   "Unable to calculate shipping cost": "We couldn't calculate shipping for this order. Please try again shortly.",
+  "Unable to reach UPS": "Shipping rates are temporarily unavailable. Please try again later.",
   "Unable to generate shipping label": "We couldn't generate a UPS label for this order. Please check the order's shipping address and try again.",
   "Unable to void UPS shipment": "UPS could not void this shipment. The shipping label is still active; please try again.",
   "UPS shipment identifier is missing": "This UPS label is missing its shipment identifier and cannot be voided automatically.",

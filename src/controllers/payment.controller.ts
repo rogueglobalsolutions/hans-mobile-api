@@ -59,6 +59,7 @@ export async function createPaymentIntent(req: Request, res: Response) {
     const clientErrors = [
       "Training not found",
       "Training is not available",
+      "Enrollment is closed",
       "Training is full",
       "You must complete",
       "Already enrolled",

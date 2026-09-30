@@ -23,14 +23,20 @@ async function getAccessToken(): Promise<string> {
   }
 
   const basicAuth = Buffer.from(`${UPS_CLIENT_ID}:${UPS_CLIENT_SECRET}`).toString("base64");
-  const response = await fetch(`${UPS_BASE_URL}/security/v1/oauth/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${basicAuth}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${UPS_BASE_URL}/security/v1/oauth/token`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${basicAuth}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: "grant_type=client_credentials",
+    });
+  } catch (error) {
+    console.error("[ups.service] Token request failed:", error);
+    throw new Error("Unable to reach UPS");
+  }
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
@@ -150,16 +156,22 @@ export async function getRate(destination: ShippingAddress, weightLbs: number, m
     },
   };
 
-  const response = await fetch(`${UPS_BASE_URL}/api/rating/v1/Rate`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      transId: transactionId,
-      transactionSrc: "hans-mobile",
-    },
-    body: JSON.stringify(requestBody),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${UPS_BASE_URL}/api/rating/v1/Rate`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        transId: transactionId,
+        transactionSrc: "hans-mobile",
+      },
+      body: JSON.stringify(requestBody),
+    });
+  } catch (error) {
+    console.error("[ups.service] Rate request failed to connect:", error);
+    throw new Error("Unable to reach UPS");
+  }
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");

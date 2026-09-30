@@ -91,6 +91,7 @@ export async function issueTrainingCredits(
 ) {
   if (input.amount <= 0) return null;
   const expiresAt = addCalendarDays(input.finalTrainingDate, CREDIT_EXPIRY_DAYS);
+  const expiredAt = expiresAt <= new Date() ? new Date() : null;
   const sourceKey = `training:${input.enrollmentId}`;
   const existing = await tx.creditGrant.findUnique({ where: { sourceKey } });
   if (existing) return existing;
@@ -101,8 +102,9 @@ export async function issueTrainingCredits(
       enrollmentId: input.enrollmentId,
       sourceKey,
       amount: input.amount,
-      remainingAmount: input.amount,
+      remainingAmount: expiredAt ? 0 : input.amount,
       expiresAt,
+      expiredAt,
     },
   });
   await tx.creditTransaction.create({
@@ -114,10 +116,22 @@ export async function issueTrainingCredits(
       referenceId: input.enrollmentId,
     },
   });
-  await tx.user.update({
-    where: { id: input.userId },
-    data: { creditBalance: { increment: input.amount } },
-  });
+  if (expiredAt) {
+    await tx.creditTransaction.create({
+      data: {
+        userId: input.userId,
+        type: CreditTransactionType.EXPIRED,
+        amount: input.amount,
+        description: "Training product credits expired before completion was recorded",
+        referenceId: grant.id,
+      },
+    });
+  } else {
+    await tx.user.update({
+      where: { id: input.userId },
+      data: { creditBalance: { increment: input.amount } },
+    });
+  }
   return grant;
 }
 

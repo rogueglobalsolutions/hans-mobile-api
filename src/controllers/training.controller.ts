@@ -373,7 +373,7 @@ export async function updateTraining(req: Request, res: Response) {
 
 export async function getTrainings(req: Request, res: Response) {
   try {
-    const trainings = await trainingService.getTrainings();
+    const trainings = await trainingService.getTrainings((req as any).userId as string);
     return res.json({
       success: true,
       message: "Trainings retrieved successfully",
@@ -438,6 +438,7 @@ export async function cancelTraining(req: Request, res: Response) {
       "Training not found",
       "Training is already cancelled",
       "Completed training sessions",
+      "Training with completed enrollees",
       "Training can only be cancelled",
       "No payment found",
     ];
