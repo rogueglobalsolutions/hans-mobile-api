@@ -5,13 +5,29 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: hans-api-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:1/hans_ci
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
@@ -25,17 +41,22 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Test
+        run: npm test
+
+      - name: Prepare reviewed deployment script
+        run: printf 'DEPLOY_SCRIPT=%s\n' "$(base64 -w 0 scripts/deploy.sh)" >> "$GITHUB_ENV"
+
       - name: Deploy (only if above succeeds)
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ramoj745
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script_stop: true
+          command_timeout: 20m
+          envs: DEPLOY_SHA,DEPLOY_SCRIPT
           script: |
-            cd /srv/hans-mobile-api
-            git pull origin main
-            npm ci
-            npx prisma generate
-            npx prisma migrate deploy
-            npm run build
-            sudo systemctl restart hans-api
+            bash -o pipefail -c 'printf "%s" "$DEPLOY_SCRIPT" | base64 --decode | bash -s -- "$DEPLOY_SHA"'

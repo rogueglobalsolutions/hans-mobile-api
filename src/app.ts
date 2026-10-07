@@ -27,6 +27,7 @@ import supportRoutes from "./routes/support.routes";
 import adsRoutes from "./routes/ads.routes";
 import discountRoutes from "./routes/discount.routes";
 import webAuthRoutes from "./routes/web/webAuth.routes";
+import healthRoutes from "./routes/health.routes";
 import { enforceTrainingPaymentDeadlines } from "./services/trainingLifecycle.service";
 import { finalizeClosedContestWeeks } from "./services/contestWeek.service";
 
@@ -51,9 +52,7 @@ app.use(express.json());
 app.use("/uploads", secureUploads, express.static(path.join(process.cwd(), "uploads")));
 
 // Routes
-app.get("/api/health", (req, res) => {
-  res.json({ status: "API is up!" });
-});
+app.use("/api/health", healthRoutes);
 
 app.use("/api/auth", authRoutes);
 app.use("/api/verification", verificationRoutes);

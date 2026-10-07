@@ -37,6 +37,7 @@ hans-mobile-api/
 ## Getting Started
 
 See [SETUP.md](./SETUP.md) for detailed setup instructions.
+See [deployment.md](./deployment.md) for production CI/CD, ownership and migration recovery.
 
 ### Quick Start
 
@@ -71,6 +72,7 @@ See [API.md](./API.md) for complete endpoint documentation.
 | `npm run dev` | Start development server with hot-reload |
 | `npm run build` | Compile TypeScript to JavaScript |
 | `npm start` | Run compiled production build |
+| `npm test` | Run service, readiness and deployment safety tests after building |
 | `npm run backfill:product-pricing -- --mode live` | Dry-run missing product pricing repair; see [backfill guide](./product-pricing-backfill.md) |
 | `npm run test:product-backfill` | Run backfill safety tests after building |
 
@@ -82,4 +84,5 @@ This project uses Prisma 7 with PostgreSQL. Key differences from earlier Prisma 
 - Requires driver adapters (`@prisma/adapter-pg`) for database connections
 - Run `npx prisma generate` after schema changes
 - Run `npx prisma db push` to sync schema (development)
-- Run `npx prisma migrate dev` for migrations (production)
+- Create and test migrations with `npx prisma migrate dev` in development
+- Apply committed migrations with `npx prisma migrate deploy` in production
