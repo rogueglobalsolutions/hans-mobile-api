@@ -71,6 +71,8 @@ See [API.md](./API.md) for complete endpoint documentation.
 | `npm run dev` | Start development server with hot-reload |
 | `npm run build` | Compile TypeScript to JavaScript |
 | `npm start` | Run compiled production build |
+| `npm run backfill:product-pricing -- --mode live` | Dry-run missing product pricing repair; see [backfill guide](./product-pricing-backfill.md) |
+| `npm run test:product-backfill` | Run backfill safety tests after building |
 
 ## Database
 

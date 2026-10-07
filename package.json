@@ -20,7 +20,9 @@
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
     "build": "tsc",
     "start": "node dist/app.js",
-    "seed:products": "ts-node-dev --transpile-only prisma/seed-products.ts"
+    "seed:products": "ts-node-dev --transpile-only prisma/seed-products.ts",
+    "backfill:product-pricing": "node dist/scripts/backfillProductPricing.js",
+    "test:product-backfill": "node --test dist/services/productCatalogBackfill.test.js"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
