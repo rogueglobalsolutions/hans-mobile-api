@@ -136,6 +136,7 @@ export async function getPendingVerifications() {
       medicalLicenseNumber: true,
       idDocumentFrontPath: true,
       idDocumentBackPath: true,
+      profilePicturePath: true,
       createdAt: true,
     },
     orderBy: {
@@ -180,6 +181,7 @@ export async function getAllUsers(role?: Role) {
       role: true,
       accountStatus: true,
       hasSubmittedVerification: true,
+      profilePicturePath: true,
       createdAt: true,
     },
     orderBy: {
