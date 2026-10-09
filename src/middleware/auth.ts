@@ -27,7 +27,7 @@ export async function authenticateToken(req: Request, res: Response, next: NextF
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { deletedAt: true, accountStatus: true },
+      select: { deletedAt: true, accountStatus: true, role: true },
     });
     if (!user || user.deletedAt || user.accountStatus === AccountStatus.SUSPENDED) {
       res.status(401).json({ success: false, message: "Account is no longer active" });
@@ -37,6 +37,8 @@ export async function authenticateToken(req: Request, res: Response, next: NextF
     // Attach user info to request object
     (req as any).userId = payload.userId;
     (req as any).email = payload.email;
+    // Lets requireRole skip a second user lookup on the same request.
+    (req as any).userRole = user.role;
 
     next();
   } catch (error) {
@@ -54,22 +56,26 @@ export function requireRole(...allowedRoles: Role[]) {
         return;
       }
 
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { role: true },
-      });
+      let role: Role | undefined = (req as any).userRole;
+      if (!role) {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { role: true },
+        });
 
-      if (!user) {
-        res.status(401).json({ success: false, message: "User not found" });
-        return;
+        if (!user) {
+          res.status(401).json({ success: false, message: "User not found" });
+          return;
+        }
+        role = user.role;
       }
 
-      if (!allowedRoles.includes(user.role)) {
+      if (!allowedRoles.includes(role)) {
         res.status(403).json({ success: false, message: "Insufficient permissions" });
         return;
       }
 
-      (req as any).userRole = user.role;
+      (req as any).userRole = role;
       next();
     } catch (error) {
       res.status(500).json({ success: false, message: "Authorization check failed" });

@@ -8,6 +8,7 @@ import * as trainingDocController from "../controllers/trainingDoc.controller";
 import * as commerceController from "../controllers/commerce.controller";
 import * as trainingLifecycleController from "../controllers/trainingLifecycle.controller";
 import * as memberController from "../controllers/member.controller";
+import * as adminDashboardController from "../controllers/adminDashboard.controller";
 import { authenticateToken, requireRole } from "../middleware/auth";
 import { Role } from "../generated/prisma/enums";
 import { uploadTrainingBg, uploadTrainingDocs, uploadProductImage } from "../middleware/upload";
@@ -17,6 +18,8 @@ const router = Router();
 // All admin routes require authentication and ADMIN role
 router.use(authenticateToken);
 router.use(requireRole(Role.ADMIN));
+
+router.get("/dashboard/summary", adminDashboardController.getDashboardSummary);
 
 // ─── Verification management ──────────────────────────────────────────────────
 
