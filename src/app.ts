@@ -28,6 +28,7 @@ import adsRoutes from "./routes/ads.routes";
 import discountRoutes from "./routes/discount.routes";
 import webAuthRoutes from "./routes/web/webAuth.routes";
 import healthRoutes from "./routes/health.routes";
+import { notificationRoutes, cartRoutes, favoriteRoutes } from "./routes/member.routes";
 import { enforceTrainingPaymentDeadlines } from "./services/trainingLifecycle.service";
 import { finalizeClosedContestWeeks } from "./services/contestWeek.service";
 
@@ -71,6 +72,9 @@ app.use("/api/locations", locationRoutes);
 app.use("/api/ads", adsRoutes);
 app.use("/api/discounts", discountRoutes);
 app.use("/api/web/auth", webAuthRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/cart", cartRoutes);
+app.use("/api/favorites", favoriteRoutes);
 app.use(express.static(path.join(process.cwd(), "public")));
 
 // Public — list sales reps for registration dropdown (MED + ADMIN)

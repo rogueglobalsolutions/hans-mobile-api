@@ -13,7 +13,7 @@ export async function getRecentTransactions(salesRepId?: string) {
       ...(salesRepId ? { salesRepId } : {}),
     },
     include: {
-      user:     { select: { id: true, fullName: true, email: true } },
+      user:     { select: { id: true, fullName: true, email: true, profilePicturePath: true } },
       training: { select: { id: true, title: true, level: true, scheduledAt: true } },
       salesRep: { select: { id: true, fullName: true } },
     },

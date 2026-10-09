@@ -5,6 +5,7 @@ import { stripe } from "../config/stripe";
 import { syncProductToJson } from "./productJsonSync.service";
 import { UPS_DEFAULT_PACKAGE_WEIGHT_LBS } from "../config/ups";
 import * as upsService from "./ups.service";
+import { sendToUsers } from "./push.service";
 import { shippingFeeCents as calculateShippingFeeCents } from "./shippingPolicy";
 import {
   getSpendableCreditBalance,
@@ -233,7 +234,7 @@ function assetPathToImageUrl(assetPath: string | null): string | null {
   return `/${encoded}/${filename}`;
 }
 
-function formatProduct(product: any) {
+export function formatProduct(product: any) {
   const primaryAsset = product.assetPath || product.images?.[0]?.assetPath || null;
   const primaryImage = product.imageUrl || product.images?.[0]?.url || assetPathToImageUrl(primaryAsset);
 
@@ -1243,6 +1244,15 @@ export async function updateOrderStatus(orderId: string, adminId: string, input:
     });
     return updated;
   });
+
+  if (order.userId && status !== current.status) {
+    const label = status.charAt(0) + status.slice(1).toLowerCase();
+    void sendToUsers([order.userId], {
+      title: `Order ${order.orderNumber} ${label}`,
+      body: `Your order is now ${label.toLowerCase()}. Tap to view the details.`,
+      data: { type: "order", orderId: order.id },
+    });
+  }
 
   return formatOrderSummary(order);
 }

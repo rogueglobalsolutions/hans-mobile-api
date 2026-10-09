@@ -5,7 +5,7 @@ import test from "node:test";
 import { applicationSchemaQueries, checkDatabaseReadiness, schemaReadinessQueries } from "./readiness.service";
 
 test("readiness covers every generated model and the previously missing fields", () => {
-  assert.equal(applicationSchemaQueries.length, 33);
+  assert.equal(applicationSchemaQueries.length, 37);
   assert.ok(applicationSchemaQueries.some((query) => query.includes('"deletedAt"') && query.includes('"public"."User"')));
   assert.ok(applicationSchemaQueries.some((query) => query.includes('"weightLbs"') && query.includes('"public"."Product"')));
   assert.ok(applicationSchemaQueries.some((query) => query.includes('"public"."TrainingChangeRequest"')));

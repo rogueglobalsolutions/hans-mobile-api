@@ -14,6 +14,16 @@ const SAFE_MESSAGES: Record<string, string> = {
   "Only rejected accounts can resubmit verification": "Only rejected accounts can resubmit verification",
   "Insufficient permissions": "Insufficient permissions",
   "User is not a MED user": "User is not a MED user",
+  // Push notifications, cart, favorites
+  "Invalid push token": "Invalid push token",
+  "Notification title is required": "Notification title is required",
+  "Notification message is required": "Notification message is required",
+  "Notification title is too long": "Notification title is too long",
+  "Notification message is too long": "Notification message is too long",
+  "Invalid notification audience": "Invalid notification audience",
+  "No devices to reach for this audience": "No devices to reach for this audience",
+  "Cart items must be a list": "Cart items must be a list",
+  "Product is required": "Product is required",
   // Profile update
   "Full name is required": "Full name is required",
   "Invalid phone number format": "Invalid phone number format",

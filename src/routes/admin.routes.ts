@@ -7,6 +7,7 @@ import * as salesRepController from "../controllers/salesRep.controller";
 import * as trainingDocController from "../controllers/trainingDoc.controller";
 import * as commerceController from "../controllers/commerce.controller";
 import * as trainingLifecycleController from "../controllers/trainingLifecycle.controller";
+import * as memberController from "../controllers/member.controller";
 import { authenticateToken, requireRole } from "../middleware/auth";
 import { Role } from "../generated/prisma/enums";
 import { uploadTrainingBg, uploadTrainingDocs, uploadProductImage } from "../middleware/upload";
@@ -132,5 +133,11 @@ router.get("/commerce/reports/financial-summary", commerceController.getFinancia
 router.get("/commerce/reports/sales", commerceController.getSalesReport);
 router.get("/commerce/reports/orders-breakdown", commerceController.getOrdersBreakdown);
 router.get("/commerce/reports/top-products", commerceController.getTopProducts);
+
+// ─── Push notifications & carts ───────────────────────────────────────────────
+
+router.get("/notifications/broadcasts", memberController.getPushConsole);
+router.post("/notifications/broadcast", memberController.sendPushBroadcast);
+router.get("/carts/abandoned", memberController.getAbandonedCarts);
 
 export default router;

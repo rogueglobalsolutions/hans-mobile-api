@@ -242,6 +242,10 @@ model User {
   creditReservations       CreditReservation[]
   creditGrants             CreditGrant[]
   reviewedTrainingRequests TrainingChangeRequest[] @relation("TrainingRequestReviewer")
+  pushTokens               PushToken[]
+  pushBroadcasts           PushBroadcast[]         @relation("PushBroadcastSender")
+  cart                     Cart?
+  favorites                Favorite[]
 }
 
 model Otp {
@@ -456,6 +460,7 @@ model Product {
   images               ProductImage[]
   orderItems           OrderItem[]
   stockAuditLogs       StockAuditLog[]
+  favorites            Favorite[]
   creditEligible       Boolean          @default(false)
 
   @@index([status])
@@ -881,4 +886,64 @@ model DiscountCode {
 
   @@index([code])
   @@index([isActive])
+}
+
+// ─── Push notifications ───────────────────────────────────────────────────────
+
+/// One Expo push token per device; a device moves to whoever signs in on it.
+model PushToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  platform  String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+/// An admin announcement and its delivery counts (ALL | MED | USER | SALES_REP).
+model PushBroadcast {
+  id             String   @id @default(uuid())
+  title          String
+  body           String
+  audience       String
+  recipientCount Int      @default(0)
+  sentCount      Int      @default(0)
+  failedCount    Int      @default(0)
+  sentById       String?
+  sentBy         User?    @relation("PushBroadcastSender", fields: [sentById], references: [id], onDelete: SetNull)
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// ─── Carts and favorites ──────────────────────────────────────────────────────
+
+/// Server mirror of a customer's on-device cart, used for abandoned-cart follow-up.
+model Cart {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items         Json
+  itemCount     Int      @default(0)
+  subtotalCents Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
+/// A product a customer hearted for quick access.
+model Favorite {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+  @@index([userId])
 }
