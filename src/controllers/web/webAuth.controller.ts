@@ -31,8 +31,9 @@ export async function login(req: Request, res: Response) {
       password,
     });
 
-    if (result.user.role !== Role.ADMIN) {
-      throw new Error("Access denied. Admin account required.");
+    // Sales reps sign in to prepare draft orders; their API access stays limited server-side.
+    if (result.user.role !== Role.ADMIN && result.user.role !== Role.SALES_REP) {
+      throw new Error("Access denied. Admin or sales rep account required.");
     }
 
     res.json({

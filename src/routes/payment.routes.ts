@@ -8,6 +8,9 @@ const router = Router();
 // Public — frontend needs publishable key
 router.get("/config", paymentController.getConfig);
 
+// Public — where Stripe Checkout returns a customer after paying an invoice (draft) order
+router.get("/checkout-complete", paymentController.checkoutComplete);
+
 // MED-only — create payment intent + pending enrollment
 router.post(
   "/create-intent",

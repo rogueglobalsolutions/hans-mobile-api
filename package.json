@@ -18,6 +18,7 @@
   },
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
+    "db:pull": "bash scripts/db-pull.sh",
     "build": "tsc",
     "start": "node dist/app.js",
     "test": "node --test dist/services/*.test.js dist/routes/*.test.js scripts/*.test.cjs",

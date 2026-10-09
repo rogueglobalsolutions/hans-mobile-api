@@ -452,3 +452,73 @@ export async function sendSupportEmail(
     return false;
   }
 }
+
+export interface InvoiceEmailData {
+  to: string;
+  customerName: string;
+  orderNumber: string;
+  items: { name: string; quantity: number; lineTotalUsd: number }[];
+  shippingUsd: number;
+  totalUsd: number;
+  checkoutUrl: string;
+  expiresAt: Date | null;
+  senderName: string;
+}
+
+const usd = (value: number) => `$${value.toFixed(2)}`;
+
+function escapeEmailHtml(value: string) {
+  return value.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
+}
+
+/** Sends a medical professional the payment link for an order prepared by an admin or sales rep. */
+export async function sendInvoiceEmail(data: InvoiceEmailData): Promise<boolean> {
+  const expires = data.expiresAt
+    ? data.expiresAt.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }) + " UTC"
+    : null;
+
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+    console.log(`
+========== INVOICE EMAIL ==========`);
+    console.log(`To: ${data.to}`);
+    console.log(`Order: ${data.orderNumber}  Total: ${usd(data.totalUsd)}`);
+    console.log(`Pay: ${data.checkoutUrl}`);
+    console.log(`===================================
+`);
+    return true;
+  }
+
+  const rows = data.items
+    .map(
+      (item) => `<tr><td style="padding:6px 0">${escapeEmailHtml(item.name)} × ${item.quantity}</td><td style="padding:6px 0;text-align:right">${usd(item.lineTotalUsd)}</td></tr>`,
+    )
+    .join("");
+
+  try {
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+      to: data.to,
+      subject: `Your Hans Biomed order ${data.orderNumber} is ready for payment`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; color: #0e1a33;">
+          <h2 style="color: #16305c;">Your order is ready</h2>
+          <p>Hi ${escapeEmailHtml(data.customerName)},</p>
+          <p>${escapeEmailHtml(data.senderName)} prepared order <strong>${escapeEmailHtml(data.orderNumber)}</strong> for you. Review it below and pay securely through Stripe.</p>
+          <table style="width:100%;border-collapse:collapse;font-size:14px;margin:16px 0;border-top:1px solid #e1e5ec;border-bottom:1px solid #e1e5ec">
+            ${rows}
+            <tr><td style="padding:6px 0;color:#5f6b82">Shipping</td><td style="padding:6px 0;text-align:right">${usd(data.shippingUsd)}</td></tr>
+            <tr><td style="padding:8px 0;font-weight:bold;border-top:1px solid #e1e5ec">Total</td><td style="padding:8px 0;text-align:right;font-weight:bold;border-top:1px solid #e1e5ec">${usd(data.totalUsd)}</td></tr>
+          </table>
+          <p style="text-align:center;margin:24px 0">
+            <a href="${data.checkoutUrl}" style="background:#c8102e;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;display:inline-block">Pay ${usd(data.totalUsd)}</a>
+          </p>
+          ${expires ? `<p style="color:#5f6b82;font-size:13px">This link expires ${expires}. If it expires, reply to your Hans Biomed contact for a new one.</p>` : ""}
+        </div>
+      `,
+    });
+    return true;
+  } catch (error) {
+    console.error("Failed to send invoice email:", error);
+    return false;
+  }
+}

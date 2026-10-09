@@ -1053,6 +1053,7 @@ export async function getInventory() {
       available,
       onHand,
       incoming: 0,
+      lowStockThreshold: product.lowStockThreshold,
     };
   });
 }
@@ -2465,6 +2466,12 @@ export async function quoteProductOrder(userId: string, input: CreateOrderIntent
     creditAppliedUsd: toDollars(prepared.creditAppliedCents),
     shippingMethod: prepared.shippingMethod,
     serviceName: prepared.rate.serviceName,
+    items: prepared.orderItems.map((item) => ({
+      productId: item.productId,
+      variantId: item.variantId,
+      unitPriceUsd: toDollars(item.unitPriceCents),
+      lineTotalUsd: toDollars(item.lineTotalCents),
+    })),
     shippingAddress: {
       address1: prepared.shippingAddress1,
       address2: prepared.shippingAddress2,
@@ -2565,6 +2572,174 @@ export async function createProductOrderIntent(userId: string, input: CreateOrde
   }
 }
 
+// Stripe caps Checkout Session lifetime at 24 hours; keep a margin.
+const INVOICE_CHECKOUT_LIFETIME_SECONDS = 23 * 60 * 60;
+
+function invoiceCheckoutReturnUrl() {
+  // Where Stripe sends the customer after paying. Without it in production, customers would
+  // land on localhost, so refuse to create links until it is configured.
+  if (!process.env.PUBLIC_API_URL && process.env.NODE_ENV === "production") {
+    throw new Error("Payment links need PUBLIC_API_URL on the server");
+  }
+  const base = (process.env.PUBLIC_API_URL || `http://localhost:${process.env.PORT || 5656}`).replace(/\/$/, "");
+  return `${base}/api/payments/checkout-complete`;
+}
+
+async function createInvoiceCheckoutSession(order: {
+  id: string;
+  orderNumber: string;
+  userId: string | null;
+  customerEmail: string;
+  shippingFeeCents: number;
+  items: { productName: string; variantLabel: string | null; unitPriceCents: number; quantity: number }[];
+}, shippingServiceName?: string | null) {
+  const metadata = {
+    kind: "product_order",
+    orderId: order.id,
+    orderNumber: order.orderNumber,
+    userId: order.userId ?? "",
+  };
+  const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = order.items.map((item) => ({
+    quantity: item.quantity,
+    price_data: {
+      currency: "usd",
+      unit_amount: item.unitPriceCents,
+      product_data: { name: item.variantLabel ? `${item.productName} (${item.variantLabel})` : item.productName },
+    },
+  }));
+  if (order.shippingFeeCents > 0) {
+    lineItems.push({
+      quantity: 1,
+      price_data: {
+        currency: "usd",
+        unit_amount: order.shippingFeeCents,
+        product_data: { name: shippingServiceName ? `Shipping (${shippingServiceName})` : "Shipping" },
+      },
+    });
+  }
+  return stripe.checkout.sessions.create({
+    mode: "payment",
+    customer_email: order.customerEmail,
+    line_items: lineItems,
+    payment_method_types: ["card"],
+    metadata,
+    payment_intent_data: { metadata },
+    client_reference_id: order.id,
+    expires_at: Math.floor(Date.now() / 1000) + INVOICE_CHECKOUT_LIFETIME_SECONDS,
+    success_url: `${invoiceCheckoutReturnUrl()}?order=${encodeURIComponent(order.orderNumber)}`,
+  });
+}
+
+/**
+ * Creates a pending product order on a customer's behalf and a Stripe Checkout link they pay through.
+ * Pricing, shipping and stock checks are the same as the in-app checkout; credits are never applied.
+ * Stock is taken when the payment webhook finalizes the order, exactly as for app orders.
+ */
+export async function createInvoiceOrderForCustomer(
+  customerId: string,
+  input: CreateOrderIntentInput,
+  actorId: string,
+  draftNumber: string,
+) {
+  const prepared = await prepareProductOrder(customerId, { ...input, applyCredits: false });
+  const { user } = prepared;
+
+  let order: any = null;
+  for (let attempt = 0; attempt < 3 && !order; attempt += 1) {
+    const orderNumber = await getNextOrderNumber();
+    try {
+      order = await prisma.$transaction(async (tx) => {
+        const created = await tx.order.create({
+          data: {
+            orderNumber, userId: customerId, customerName: user.fullName, customerEmail: user.email,
+            customerPhone: user.phoneNumber, shippingAddress1: prepared.shippingAddress1,
+            shippingAddress2: prepared.shippingAddress2, shippingCity: prepared.shippingCity,
+            shippingState: prepared.shippingState, shippingZipCode: prepared.shippingZipCode,
+            shippingCountry: prepared.shippingCountry, shippingMethod: prepared.shippingMethod,
+            subtotalCents: prepared.subtotalCents, shippingFeeCents: prepared.shippingFeeCents,
+            totalAmountCents: prepared.totalAmountCents, creditAppliedCents: 0,
+            cardAmountCents: prepared.totalAmountCents, notes: prepared.notes,
+            items: { create: prepared.orderItems },
+          },
+          include: { items: true },
+        });
+        await tx.orderStatusHistory.create({
+          data: {
+            orderId: created.id,
+            updatedById: actorId,
+            action: "invoice_created",
+            note: `Created from draft ${draftNumber}`,
+            status: CommerceOrderStatus.PENDING,
+            paymentStatus: CommercePaymentStatus.PENDING,
+          },
+        });
+        return created;
+      });
+    } catch (error: any) {
+      if (error?.code !== "P2002" || attempt === 2) throw error;
+    }
+  }
+  if (!order) throw new Error("Unable to create order number");
+
+  try {
+    const session = await createInvoiceCheckoutSession(order, prepared.rate.serviceName);
+    await prisma.order.update({ where: { id: order.id }, data: { stripeCheckoutId: session.id } });
+    return {
+      order: await getOrderById(order.id),
+      checkoutUrl: session.url,
+      checkoutExpiresAt: session.expires_at ? new Date(session.expires_at * 1000) : null,
+    };
+  } catch (error) {
+    await prisma.order.delete({ where: { id: order.id } }).catch(() => undefined);
+    throw error;
+  }
+}
+
+/** Issues a fresh Checkout link for an unpaid invoice order, expiring the previous one. */
+export async function renewInvoiceCheckout(orderId: string) {
+  const order = await prisma.order.findUnique({ where: { id: orderId }, include: { items: true } });
+  if (!order) throw new Error("Order not found");
+  if (order.paymentStatus === CommercePaymentStatus.PAID) throw new Error("This order is already paid");
+  if (order.status === CommerceOrderStatus.CANCELLED) throw new Error("This order was cancelled");
+
+  if (order.stripeCheckoutId) {
+    const previous = await stripe.checkout.sessions.retrieve(order.stripeCheckoutId);
+    if (previous.payment_status === "paid") throw new Error("This order is already paid");
+    if (previous.status === "open") await stripe.checkout.sessions.expire(previous.id);
+  }
+
+  const session = await createInvoiceCheckoutSession(order);
+  await prisma.order.update({ where: { id: order.id }, data: { stripeCheckoutId: session.id } });
+  return {
+    checkoutUrl: session.url,
+    checkoutExpiresAt: session.expires_at ? new Date(session.expires_at * 1000) : null,
+  };
+}
+
+/** Cancels an unpaid invoice order and closes its Checkout link. */
+export async function cancelInvoiceOrder(orderId: string, actorId: string, reason: string) {
+  const order = await prisma.order.findUnique({ where: { id: orderId } });
+  if (!order) return;
+  if (order.paymentStatus === CommercePaymentStatus.PAID) {
+    throw new Error("This order is already paid; cancel or refund it from Orders");
+  }
+  if (order.stripeCheckoutId) {
+    const session = await stripe.checkout.sessions.retrieve(order.stripeCheckoutId);
+    if (session.payment_status === "paid") throw new Error("This order is already paid; cancel or refund it from Orders");
+    if (session.status === "open") await stripe.checkout.sessions.expire(session.id);
+  }
+  await prisma.$transaction(async (tx) => {
+    const updated = await tx.order.updateMany({
+      where: { id: orderId, paymentStatus: { not: CommercePaymentStatus.PAID }, status: { not: CommerceOrderStatus.CANCELLED } },
+      data: { status: CommerceOrderStatus.CANCELLED, cancelledAt: new Date(), cancellationReason: reason },
+    });
+    if (updated.count === 0) return;
+    await tx.orderStatusHistory.create({
+      data: { orderId, updatedById: actorId, action: "invoice_cancelled", note: reason, status: CommerceOrderStatus.CANCELLED },
+    });
+  });
+}
+
 async function refundUnfulfillableProductOrder(
   order: { id: string; userId: string | null; cardAmountCents: number | null; totalAmountCents: number },
   paymentIntent: Stripe.PaymentIntent,
@@ -2647,8 +2822,16 @@ async function refundUnfulfillableProductOrder(
 }
 
 async function finalizeProductOrderPayment(paymentIntent: Stripe.PaymentIntent, userId?: string) {
+  const metadataOrderId = paymentIntent.metadata?.orderId;
   const order = await prisma.order.findFirst({
-    where: { ...(userId ? { userId } : {}), stripePaymentIntentId: paymentIntent.id },
+    where: {
+      ...(userId ? { userId } : {}),
+      OR: [
+        { stripePaymentIntentId: paymentIntent.id },
+        // Invoice (draft) orders are paid through Checkout, so the intent id is learned here.
+        ...(metadataOrderId ? [{ id: metadataOrderId, stripePaymentIntentId: null, stripeCheckoutId: { not: null } }] : []),
+      ],
+    },
     include: { items: true },
   });
   if (!order) throw new Error("Order not found");
@@ -2686,6 +2869,7 @@ async function finalizeProductOrderPayment(paymentIntent: Stripe.PaymentIntent, 
         paymentStatus: CommercePaymentStatus.PAID,
         status: CommerceOrderStatus.PROCESSING,
         paidAt: new Date(),
+        stripePaymentIntentId: paymentIntent.id,
       },
     });
     if (claim.count === 0) return false;

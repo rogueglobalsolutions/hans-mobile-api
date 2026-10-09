@@ -1,4 +1,22 @@
 const SAFE_MESSAGES: Record<string, string> = {
+  // Draft orders
+  "Payment links need PUBLIC_API_URL on the server": "Payment links are not configured on the server yet (PUBLIC_API_URL is missing).",
+  "Choose a medical professional for this order": "Choose a medical professional for this order",
+  "Customer must be a medical professional": "Customer must be a medical professional",
+  "This medical professional's account is not active": "This medical professional's account is not active",
+  "Add at least one product": "Add at least one product",
+  "A draft can hold at most 50 lines": "A draft can hold at most 50 lines",
+  "Each line needs a product": "Each line needs a product",
+  "Quantity must be between 1 and 999": "Quantity must be between 1 and 999",
+  "A selected product no longer exists": "A selected product no longer exists",
+  "Only open drafts can be edited": "Only open drafts can be edited",
+  "This draft was already sent": "This draft was already sent",
+  "Send this draft first": "Send this draft first",
+  "Draft order not found": "Draft order not found",
+  "This order is already paid": "This order is already paid",
+  "This order was cancelled": "This order was cancelled",
+  "This order is already paid; cancel or refund it from Orders": "This order is already paid; cancel or refund it from Orders",
+  "Access denied. Admin or sales rep account required.": "Access denied. Admin or sales rep account required.",
   "Email already registered": "Email already registered",
   "Phone number already registered": "Phone number already registered",
   "Invalid email or password": "Invalid email or password",
@@ -272,6 +290,17 @@ const FALLBACK_MESSAGES: Record<string, string> = {
   getMyCommerceOrders: "Failed to load your orders.",
   getProductCheckoutProfile: "Failed to load your shipping address.",
   quoteProductOrder: "Failed to calculate your order total.",
+  // Draft orders
+  listDraftOrders: "Failed to load draft orders.",
+  getDraftOrder: "Failed to load draft order.",
+  createDraftOrder: "Failed to save draft order.",
+  updateDraftOrder: "Failed to save draft order.",
+  sendDraftOrder: "Failed to send the payment link. Please try again.",
+  resendDraftOrder: "Failed to send a new payment link. Please try again.",
+  cancelDraftOrder: "Failed to cancel draft order.",
+  lookupDraftCustomers: "Failed to load medical professionals.",
+  lookupDraftProducts: "Failed to load products.",
+  quoteDraftOrder: "Could not price this order.",
 };
 
 export function sanitizeError(error: unknown, operation: string): string {
@@ -285,7 +314,8 @@ export function sanitizeError(error: unknown, operation: string): string {
     if (
       error.message.startsWith("You need at least") ||
       error.message.startsWith("You must complete") ||
-      /^Only \d+ available for /.test(error.message)
+      /^Only \d+ available for /.test(error.message) ||
+      error.message.startsWith("The selected option for ")
     ) {
       return error.message;
     }

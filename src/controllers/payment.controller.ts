@@ -107,6 +107,25 @@ export async function failPayment(req: Request, res: Response) {
   }
 }
 
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
+}
+
+// Landing page after a customer pays an invoice link. Payment is confirmed by the webhook,
+// so this page only acknowledges the redirect.
+export function checkoutComplete(req: Request, res: Response) {
+  const orderNumber = typeof req.query.order === "string" ? escapeHtml(req.query.order.slice(0, 64)) : "";
+  res.type("html").send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payment received · Hans Biomed</title></head>
+<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#f2f4f8;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#0e1a33">
+<main style="max-width:420px;margin:24px;padding:32px;background:#fff;border:1px solid #e1e5ec;border-radius:12px">
+<h1 style="margin:0 0 8px;font-size:22px">Payment received</h1>
+<p style="margin:0 0 16px;color:#3f4b63;line-height:1.5">Thank you. ${orderNumber ? `Your order <strong>${orderNumber}</strong> is` : "Your order is"} now being processed, and you can follow it in the Hans app.</p>
+<p style="margin:0;color:#5f6b82;font-size:13px">You can close this page.</p>
+</main></body></html>`);
+}
+
 export async function handleWebhook(req: Request, res: Response) {
   const sig = req.headers["stripe-signature"] as string;
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;

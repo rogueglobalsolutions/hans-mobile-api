@@ -246,6 +246,8 @@ model User {
   pushBroadcasts           PushBroadcast[]         @relation("PushBroadcastSender")
   cart                     Cart?
   favorites                Favorite[]
+  draftOrders              DraftOrder[]            @relation("DraftOrderCustomer")
+  createdDraftOrders       DraftOrder[]            @relation("DraftOrderCreator")
 }
 
 model Otp {
@@ -485,6 +487,62 @@ model ProductVariant {
   @@index([productId])
 }
 
+enum DraftOrderStatus {
+  OPEN
+  INVOICE_SENT
+  CANCELLED
+}
+
+// An order an admin or sales rep prepares for a medical professional. It holds no stock;
+// sending it creates a pending Order plus a Stripe Checkout link, and stock is taken when
+// that order is paid.
+model DraftOrder {
+  id                String           @id @default(uuid())
+  draftNumber       String           @unique
+  customerId        String
+  customer          User             @relation("DraftOrderCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+  createdById       String
+  createdBy         User             @relation("DraftOrderCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  status            DraftOrderStatus @default(OPEN)
+  shippingAddress1  String?
+  shippingAddress2  String?
+  shippingCity      String?
+  shippingState     String?
+  shippingZipCode   String?
+  shippingCountry   String?
+  shippingMethod    ShippingMethod   @default(GROUND)
+  notes             String?
+  subtotalCents     Int?
+  shippingFeeCents  Int?
+  totalAmountCents  Int?
+  orderId           String?          @unique
+  order             Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  checkoutUrl       String?
+  checkoutExpiresAt DateTime?
+  invoiceSentAt     DateTime?
+  cancelledAt       DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  items             DraftOrderItem[]
+
+  @@index([customerId])
+  @@index([createdById])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model DraftOrderItem {
+  id           String     @id @default(uuid())
+  draftOrderId String
+  draftOrder   DraftOrder @relation(fields: [draftOrderId], references: [id], onDelete: Cascade)
+  productId    String
+  variantId    String?
+  quantity     Int
+  sortOrder    Int        @default(0)
+
+  @@index([draftOrderId])
+}
+
 model ProductImage {
   id        String  @id @default(uuid())
   productId String
@@ -552,6 +610,7 @@ model Order {
   refunds                   OrderRefund[]
   shippingLabels            ShippingLabel[]
   creditReservation         CreditReservation?
+  draftOrder                DraftOrder?
 
   @@index([userId])
   @@index([status])
